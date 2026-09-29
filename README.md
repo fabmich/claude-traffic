@@ -106,4 +106,5 @@ All simulation code is independent of the DOM. `window.__game` exposes the runni
 ## Deployment
 
 - `.github/workflows/ci.yml` typechecks, tests and builds every push, and uploads the game as a build artifact.
-- `.github/workflows/pages.yml` publishes the game to GitHub Pages on pushes to `main`. Enable it once under **Settings → Pages → Source: GitHub Actions**.
+- `.github/workflows/pages.yml` publishes the game to GitHub Pages on pushes to `main`. To set it up, make `main` the default branch, then choose **Settings → Pages → Source: GitHub Actions**.
+- If Pages was switched on while another branch was the default, the `github-pages` environment only accepts that branch, and deploying from `main` fails with "Branch "main" is not allowed to deploy to github-pages due to environment protection rules". Add `main` under **Settings → Environments → github-pages → Deployment branches and tags**, then run the workflow again.
