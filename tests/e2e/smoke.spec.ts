@@ -135,3 +135,71 @@ test('junction editor: traffic lights and lane manager work from the UI', async 
   expect(outsAfter).toBeLessThan(outsBefore);
   expect(errors).toEqual([]);
 });
+
+test('zoning near a road from the highway grows a town', async ({ page }) => {
+  const errors: string[] = [];
+  // Seed 8 has open land next to its first highway exit.
+  await startGame(page, errors, { seed: 8 });
+  const exit = await page.evaluate(() => {
+    const m = (window as unknown as G).__game.world.map;
+    const DX = [1, 1, 0, -1, -1, -1, 0, 1];
+    const DY = [0, 1, 1, 1, 0, -1, -1, -1];
+    const oc = m.outside[0];
+    return { x: oc.x + DX[oc.dir] * oc.length, y: oc.y + DY[oc.dir] * oc.length, dx: DX[oc.dir], dy: DY[oc.dir] };
+  });
+  const at = (k: number, side: number): [number, number] => [exit.x + exit.dx * k - exit.dy * side, exit.y + exit.dy * k + exit.dx * side];
+  await page.evaluate(
+    ([x, y]) => {
+      const c = (window as unknown as G).__game.renderer.camera;
+      c.x = (x + 0.5) * 24;
+      c.y = (y + 0.5) * 24;
+      c.setZoom(Math.min(c.viewW, c.viewH - 250) / (18 * 24));
+    },
+    at(6, 0),
+  );
+  await page.waitForTimeout(300);
+  await page.keyboard.press('r');
+  await dragTiles(page, at(0, 0), at(12, 0));
+  await page.keyboard.press('z');
+  await expect(page.locator('.subtoolbar .tool-btn.active')).toContainText('Residential');
+  await dragTiles(page, at(1, 1), at(11, 3));
+  await page.locator('.subtoolbar .tool-btn', { hasText: 'Industrial' }).click();
+  await dragTiles(page, at(1, -1), at(11, -3));
+  const zoned = await page.evaluate(() => {
+    const z = (window as unknown as G).__game.world.city.zones as Uint8Array;
+    return { r: z.filter((v) => v === 1).length, i: z.filter((v) => v === 3).length };
+  });
+  expect(zoned.r).toBeGreaterThan(15);
+  expect(zoned.i).toBeGreaterThan(15);
+  await page.keyboard.press('Escape');
+  const stats = await page.evaluate(() => {
+    const w = (window as unknown as G).__game.world;
+    let vehicles = 0;
+    for (let i = 0; i < 1.5 * 10800; i++) {
+      w.step(0.1);
+      if (i % 100 === 0) vehicles = Math.max(vehicles, w.traffic.count);
+    }
+    const buildings = w.city.buildings.filter((b: { state: number } | null) => b && b.state === 1);
+    return { pop: w.city.population as number, buildings: buildings.length as number, vehicles, first: buildings[0] ? [buildings[0].x0, buildings[0].y0] : null };
+  });
+  expect(stats.pop).toBeGreaterThan(20);
+  expect(stats.buildings).toBeGreaterThan(5);
+  expect(stats.vehicles).toBeGreaterThan(0);
+  // Inspect a building and open the city panel.
+  await page.evaluate(
+    ([x, y]) => {
+      const c = (window as unknown as G).__game.renderer.camera;
+      c.x = (x + 0.5) * 24;
+      c.y = (y + 0.5) * 24;
+    },
+    stats.first!,
+  );
+  await page.waitForTimeout(200);
+  const [cx, cy] = await screenOf(page, stats.first![0], stats.first![1]);
+  await page.mouse.click(cx, cy);
+  await expect(page.locator('.side-panel .zone-tag')).toBeVisible();
+  await page.keyboard.press('c');
+  await expect(page.locator('.side-panel .tabs')).toBeVisible();
+  await expect(page.locator('.demand-bar')).toHaveCount(4);
+  expect(errors).toEqual([]);
+});

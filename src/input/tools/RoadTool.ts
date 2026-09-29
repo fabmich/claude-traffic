@@ -132,12 +132,26 @@ export class RoadTool implements Tool {
     }
     ctx.fillStyle = 'rgba(230, 60, 50, 0.35)';
     for (const t of plan.bad) ctx.fillRect((t % w) * TILE, Math.floor(t / w) * TILE, TILE, TILE);
+    if (plan.valid) {
+      ctx.fillStyle = 'rgba(240, 140, 40, 0.45)';
+      ctx.strokeStyle = 'rgba(240, 140, 40, 0.95)';
+      ctx.lineWidth = 1.5 / r.camera.zoom;
+      for (const id of plan.demolish) {
+        const b = world.city.buildings[id];
+        if (!b) continue;
+        const bw = (b.x1 - b.x0 + 1) * TILE;
+        const bh = (b.y1 - b.y0 + 1) * TILE;
+        ctx.fillRect(b.x0 * TILE, b.y0 * TILE, bw, bh);
+        ctx.strokeRect(b.x0 * TILE, b.y0 * TILE, bw, bh);
+      }
+    }
     const last = plan.path[plan.path.length - 1];
     let text: string;
     if (!plan.valid) text = plan.reason;
     else {
       const extras = plan.spans.map((s) => `${s.kind} ${s.len}`).join(', ');
       text = `${formatMoney(plan.cost)}${extras ? ` · ${extras}` : ''}`;
+      if (plan.demolish.length) text += ` · demolishes ${plan.demolish.length} building${plan.demolish.length > 1 ? 's' : ''}`;
       if (!world.canAfford(plan.cost)) text += ' · not enough money';
     }
     r.label(text, cx(last), cy(last), { dy: -26, bg: plan.valid && world.canAfford(plan.cost) ? 'rgba(20, 30, 40, 0.82)' : 'rgba(170, 40, 35, 0.9)' });

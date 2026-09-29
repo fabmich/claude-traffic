@@ -42,6 +42,8 @@ export interface RoadPlan {
   reason: string;
   /** Tiles to highlight as problems. */
   bad: number[];
+  /** Buildings in the way that get demolished. */
+  demolish: number[];
 }
 
 const DIAG = Math.SQRT2;
@@ -67,7 +69,11 @@ function stepDir(ctx: PlanContext, a: number, b: number): number {
 
 /** Plans building a road of `typeId` along a tile path. */
 export function planRoad(ctx: PlanContext, path: number[], typeId: number, overpass: boolean): RoadPlan {
-  const plan: RoadPlan = { path, edges: [], spans: [], cost: 0, valid: true, reason: '', bad: [] };
+  const plan: RoadPlan = { path, edges: [], spans: [], cost: 0, valid: true, reason: '', bad: [], demolish: [] };
+  const demolish = new Set<number>();
+  const clearTile = (t: number): void => {
+    if (t >= 0 && ctx.buildingAt[t] >= 0) demolish.add(ctx.buildingAt[t]);
+  };
   const type = ROAD_TYPES[typeId];
   const fail = (reason: string, bad: number[] = []): RoadPlan => {
     plan.valid = false;
@@ -76,6 +82,7 @@ export function planRoad(ctx: PlanContext, path: number[], typeId: number, overp
     return plan;
   };
   if (path.length < 2) return fail('Drag to draw a road');
+  if (path.some((t) => t < 0 || t >= ctx.w * ctx.h)) return fail('Roads must stay on the map');
   const roads = ctx.roads;
   const dirs: number[] = [];
   for (let i = 1; i < path.length; i++) {
@@ -83,7 +90,9 @@ export function planRoad(ctx: PlanContext, path: number[], typeId: number, overp
     if (d < 0) return fail('Path is not continuous');
     dirs.push(d);
   }
-  const cls = path.map((t) => tileClass(ctx, t));
+  // Buildings on the ground route are demolished (only bridges cannot pass over them).
+  const under = path.map((t) => tileClass(ctx, t));
+  const cls = under.map((c) => (c === 'building' ? 'land' : c));
   if (cls[0] !== 'land') return fail('Roads must start on land', [path[0]]);
   if (cls[path.length - 1] !== 'land') return fail('Roads must end on land', [path[path.length - 1]]);
 
@@ -96,7 +105,7 @@ export function planRoad(ctx: PlanContext, path: number[], typeId: number, overp
     if (len < 2) return fail('An overpass must span at least one tile');
     if (len > MAX_BRIDGE_TILES) return fail(`Overpasses can span at most ${MAX_BRIDGE_TILES} tiles`);
     for (let i = 1; i < path.length - 1; i++) {
-      const c = cls[i];
+      const c = under[i];
       if (c === 'mountain' || c === 'building') return fail('Cannot bridge over mountains or buildings', [path[i]]);
       if (roads.bridgeCover[path[i]] >= 0) return fail('Another bridge is in the way', [path[i]]);
       if (roads.spansTouching(path[i]).some((s) => s.kind === 'bridge')) return fail('Another bridge is in the way', [path[i]]);
@@ -105,6 +114,9 @@ export function planRoad(ctx: PlanContext, path: number[], typeId: number, overp
     const cost = type.cost * len * (d0 & 1 ? DIAG : 1) * BRIDGE_COST_MULT;
     plan.spans.push({ kind: 'bridge', a: path[0], b: path[path.length - 1], dir: d0, len, type: typeId, cost });
     plan.cost = Math.round(cost);
+    clearTile(path[0]);
+    clearTile(path[path.length - 1]);
+    plan.demolish = [...demolish];
     return plan;
   }
 
@@ -116,11 +128,16 @@ export function planRoad(ctx: PlanContext, path: number[], typeId: number, overp
     if (cls[i + 1] === 'land') {
       // Ground edge between two land tiles.
       if (roads.diagonalBlocked(a, d)) fail('Diagonal roads cannot cross', [a, b]);
+      clearTile(a);
+      clearTile(b);
       if (d & 1) {
         const s1 = roads.neighbor(a, (d + 7) & 7);
         const s2 = roads.neighbor(a, (d + 1) & 7);
         const blocked = (t: number): boolean => t >= 0 && tileClass(ctx, t) !== 'land' && tileClass(ctx, t) !== 'building';
         if (blocked(s1) && blocked(s2)) fail('Cannot squeeze diagonally between water or rock', [a, b]);
+        // A diagonal road cuts the corners of the two side tiles.
+        clearTile(s1);
+        clearTile(s2);
       }
       if (roads.spanAt(a, d)) fail('A bridge or tunnel already leaves here', [a]);
       const existing = roads.edgeType(a, d);
@@ -154,7 +171,8 @@ export function planRoad(ctx: PlanContext, path: number[], typeId: number, overp
     while (j < path.length && cls[j] !== 'land') j++;
     const run = path.slice(i + 1, j);
     if (j >= path.length) return fail('Roads must end on land', run);
-    if (run.some((_, k) => cls[i + 1 + k] === 'building')) return fail('Buildings are in the way', run);
+    clearTile(path[i]);
+    clearTile(path[j]);
     const d0 = dirs[i];
     for (let k = i; k < j; k++) if (dirs[k] !== d0) return fail('Bridges and tunnels must be straight', run);
     const hasRock = run.some((_, k) => cls[i + 1 + k] === 'mountain');
@@ -171,6 +189,7 @@ export function planRoad(ctx: PlanContext, path: number[], typeId: number, overp
     i = j;
   }
   plan.cost = Math.round(plan.cost);
+  plan.demolish = [...demolish];
   if (plan.valid && plan.edges.length === 0 && plan.spans.length === 0) {
     plan.valid = false;
     plan.reason = 'Already built';

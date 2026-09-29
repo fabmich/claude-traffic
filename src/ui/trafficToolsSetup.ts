@@ -23,7 +23,7 @@ export function setupTrafficTools(game: Game): TrafficToolset {
   const sub = game.tools.showSub;
   const locked = (need: number): boolean => {
     const w = game.world;
-    return !!w && !w.sandbox && ui.population < need;
+    return !!w && !w.sandbox && ui.unlockPopulation < need;
   };
 
   const renderJunctionModes = (host: HTMLElement): void => {

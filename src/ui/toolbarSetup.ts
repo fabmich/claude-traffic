@@ -34,7 +34,7 @@ function roadSwatch(t: RoadType): string {
 export function isRoadUnlocked(game: Game, t: RoadType): boolean {
   const world = game.world;
   if (!world || world.sandbox) return true;
-  return game.ui.population >= t.unlockPop;
+  return game.ui.unlockPopulation >= t.unlockPop;
 }
 
 /** A button for the secondary toolbar. */
@@ -163,11 +163,12 @@ export function setupToolbar(game: Game): Toolset {
     for (const [kind, label, title] of [
       ['delays', 'Junction delays', 'Average waiting time at each junction'],
       ['speed', 'Speed limits', 'Show the speed limit of every road'],
-    ] as Array<['delays' | 'speed', string, string]>) {
+      ['happiness', 'Happiness', 'Colour buildings by happiness (green = happy, red = unhappy)'],
+    ] as Array<['delays' | 'speed' | 'happiness', string, string]>) {
       host.append(
         subButton({
           label,
-          icon: kind === 'delays' ? ICONS.clock : ICONS.speed,
+          icon: kind === 'delays' ? ICONS.clock : kind === 'speed' ? ICONS.speed : ICONS.people,
           sub: game.overlay === kind ? 'on' : 'off',
           title,
           active: game.overlay === kind,

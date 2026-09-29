@@ -1,5 +1,6 @@
 import { TILE } from '../config';
 import type { World } from '../game/World';
+import { occupiedTile, paintCity } from './buildingDraw';
 import { Camera } from './camera';
 import { ChunkLayer } from './chunkCache';
 import { PAL } from './palette';
@@ -43,8 +44,10 @@ export class Renderer {
     this.ground?.dispose();
     this.terrainColors = new TerrainColors(world.map);
     const colors = this.terrainColors;
+    const occupied = (t: number): boolean => occupiedTile(world, t);
     this.ground = new ChunkLayer(world.map.w, world.map.h, (ctx, tx0, ty0, tx1, ty1, ppt) => {
-      paintTerrain(ctx, world.map, colors, tx0, ty0, tx1, ty1, ppt);
+      paintTerrain(ctx, world.map, colors, tx0, ty0, tx1, ty1, ppt, occupied);
+      paintCity(ctx, world, tx0, ty0, tx1, ty1, ppt);
       paintRoadsGround(ctx, world.network, world.map.w, tx0, ty0, ppt);
       for (const p of this.groundPainters) p(ctx, tx0, ty0, tx1, ty1, ppt);
       return true;
@@ -54,9 +57,16 @@ export class Renderer {
       paintRoadsElevated(ctx, world.network, world.map.w, tx0, ty0, ppt),
     );
     this.unsubscribe?.();
-    this.unsubscribe = world.events.on('network', (rects) => {
+    const offNet = world.events.on('network', (rects) => {
       for (const r of rects) this.invalidateTiles(r.x0, r.y0, r.x1, r.y1);
     });
+    const offTiles = world.events.on('tiles', (rects) => {
+      for (const r of rects) this.ground?.invalidateTiles(r.x0 - 1, r.y0 - 1, r.x1 + 1, r.y1 + 1);
+    });
+    this.unsubscribe = () => {
+      offNet();
+      offTiles();
+    };
   }
 
   /** Marks the static ground layer stale in an inclusive tile rectangle. */

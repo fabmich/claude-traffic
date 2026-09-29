@@ -14,7 +14,7 @@ export function openSegmentPanel(game: Game, key: string): void {
   const kv = kvList(['Type', 'Lanes', 'Length', 'Vehicles now', 'Average speed']);
   const controls = h('div');
   handle.body.append(kv.el, controls);
-  const locked = (need: number): boolean => !world.sandbox && game.ui.population < need;
+  const locked = (need: number): boolean => !world.sandbox && game.ui.unlockPopulation < need;
 
   const renderControls = (): void => {
     clear(controls);

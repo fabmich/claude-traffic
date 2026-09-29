@@ -899,3 +899,278 @@ label.inline {
   font-size: 12px;
   color: var(--warn);
 }
+
+/* ---------- City ---------- */
+.clickable {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.clickable:hover {
+  background: var(--hover);
+}
+
+.demand-group {
+  padding: 0 6px;
+}
+
+.meter {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(120, 130, 140, 0.18);
+  overflow: hidden;
+}
+
+.meter i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  display: block;
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+
+.zone-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.zone-tag i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.problem-list,
+.advice {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.problem-list li {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+.problem-list li.ok {
+  color: var(--good);
+}
+
+.advice li {
+  line-height: 1.35;
+}
+
+.tabs {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.tabs .seg {
+  flex: 1;
+}
+
+.hbar-row {
+  display: grid;
+  grid-template-columns: 84px 1fr 34px;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.hbar-name {
+  color: var(--muted);
+}
+
+.hbar {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(120, 130, 140, 0.16);
+}
+
+.hbar::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--faint);
+}
+
+.hbar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+  border-radius: 5px;
+}
+
+.hbar-val {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+table.budget {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+table.budget th {
+  text-align: right;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 2px 0;
+}
+
+table.budget td {
+  padding: 2px 0;
+}
+
+table.budget td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+table.budget tr.group td {
+  padding-top: 8px;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+table.budget tr.total td {
+  border-top: 1px solid var(--border);
+  font-weight: 700;
+}
+
+table.budget tr.net td {
+  border-top: 2px solid var(--border);
+  font-weight: 800;
+  padding-top: 5px;
+}
+
+.tax-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tax-row {
+  display: grid;
+  grid-template-columns: 96px 1fr 38px;
+  align-items: center;
+  gap: 8px;
+}
+
+.tax-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.tax-name i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.tax-val {
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.milestones {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.milestone {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  opacity: 0.6;
+}
+
+.milestone.done {
+  opacity: 1;
+  border-color: var(--good);
+}
+
+.milestone.next {
+  opacity: 1;
+  border-color: var(--accent);
+}
+
+.ms-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ms-head span,
+.ms-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.milestone .meter {
+  margin-top: 6px;
+}
+
+.milestone-card {
+  position: absolute;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 280px;
+  max-width: min(460px, calc(100% - 32px));
+  padding: 14px 18px;
+  text-align: center;
+  cursor: pointer;
+  border-top: 4px solid var(--good);
+  transition: opacity 0.5s;
+  z-index: 15;
+}
+
+.milestone-card.fade {
+  opacity: 0;
+}
+
+.mc-title {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.mc-sub {
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.mc-unlocks {
+  margin-top: 8px;
+  font-size: 12.5px;
+}

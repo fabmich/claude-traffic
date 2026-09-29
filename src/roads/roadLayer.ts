@@ -241,6 +241,16 @@ export class RoadLayer {
     return m;
   }
 
+  /** True if a diagonal road cuts a corner of this tile without the tile being on it. */
+  diagonalCorner(tile: number): boolean {
+    const x = tile % this.w;
+    const y = (tile - x) / this.w;
+    const n = y > 0 ? tile - this.w : -1;
+    const e = x < this.w - 1 ? tile + 1 : -1;
+    const wv = x > 0 ? tile - 1 : -1;
+    return (n >= 0 && (this.edgeType(n, 1) !== 0 || this.edgeType(n, 3) !== 0)) || (e >= 0 && this.edgeType(e, 3) !== 0) || (wv >= 0 && this.edgeType(wv, 1) !== 0);
+  }
+
   hasRoad(tile: number): boolean {
     for (let d = 0; d < 8; d++) if (this.edgeType(tile, d) !== 0) return true;
     for (const s of this.spans.values()) if (s.a === tile || s.b === tile) return true;

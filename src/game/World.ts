@@ -1,9 +1,11 @@
 import { ROUNDABOUT_COST, ROUNDABOUT_LARGE_COST, SIGNAL_COST, START_MONEY, TILE } from '../config';
+import { City } from '../city/City';
 import { Emitter } from '../core/events';
 import { Rng } from '../core/rng';
 import { CompileCache, compileNetwork } from '../roads/compile';
 import type { ControlKind, Network, RoadNode } from '../roads/network';
 import { planBulldoze, planRoad, type BulldozePlan, type PlanContext, type RoadPlan } from '../roads/placement';
+import { ringSpec } from '../roads/roundabout';
 import { ATTR_BUS_LANE, ATTR_TRUCK_BAN, EDGE_ONEWAY_REV, RoadLayer } from '../roads/roadLayer';
 import { ROAD } from '../roads/roadTypes';
 import { armsSignature, JunctionSettings, type JunctionSetting, type SignalPlanSetting, type SignKind } from '../roads/settings';
@@ -31,6 +33,8 @@ export interface TileRect {
 export type WorldEvents = {
   /** The road network was recompiled; rects are tile areas whose drawing changed. */
   network: TileRect[];
+  /** Zones or buildings changed in these tile areas. */
+  tiles: TileRect[];
   money: number;
 };
 
@@ -50,6 +54,7 @@ export class World {
   network: Network;
   readonly traffic: TrafficSim;
   readonly generator: TrafficGenerator;
+  readonly city: City;
   money: number;
   private compileCache = new CompileCache();
   private segSigs = new Map<string, TileRect>();
@@ -71,6 +76,8 @@ export class World {
       () => this.network,
       options.seed,
     );
+    this.city = new City(this);
+    this.city.events.on('tiles', (rects) => this.events.emit('tiles', rects));
   }
 
   get sandbox(): boolean {
@@ -105,6 +112,7 @@ export class World {
   applyRoadPlan(plan: RoadPlan): string | null {
     if (!plan.valid) return plan.reason;
     if (!this.canAfford(plan.cost)) return 'Not enough money';
+    for (const id of plan.demolish) this.city?.removeBuilding(id);
     for (const e of plan.edges) {
       const idx = this.roads.edgeIndex(e.tile, e.dir);
       const attr = idx >= 0 ? this.roads.attr[idx] : 0;
@@ -112,6 +120,10 @@ export class World {
       this.roads.setEdge(e.tile, e.dir, e.type, e.flowOut, speed, attr);
     }
     for (const s of plan.spans) this.roads.addSpan({ kind: s.kind, a: s.a, b: s.b, dir: s.dir, len: s.len, type: s.type, flags: 0, speed: 0, attr: 0 });
+    const touched: number[] = [];
+    for (const e of plan.edges) touched.push(e.tile, this.roads.neighbor(e.tile, e.dir));
+    for (const s of plan.spans) touched.push(s.a, s.b);
+    this.city?.onRoadsBuilt(touched);
     this.spend(plan.cost);
     this.rebuildNetwork();
     return null;
@@ -122,6 +134,7 @@ export class World {
   }
 
   applyBulldoze(plan: BulldozePlan): void {
+    for (const id of plan.buildings) this.city.removeBuilding(id);
     for (const e of plan.edges) this.roads.removeEdge(e.tile, e.dir);
     for (const id of plan.spans) this.roads.removeSpan(id);
     this.earn(plan.refund);
@@ -149,6 +162,20 @@ export class World {
     if (nodes.length === 0) return 0;
     if (nodes[0].ringOf !== null) return nodes.length;
     return nodes[0].arms.length;
+  }
+
+  /** Tiles whose square overlaps a circle (world meters). */
+  tilesInCircle(cx: number, cy: number, r: number): number[] {
+    const out: number[] = [];
+    const { w, h } = this.map;
+    for (let y = Math.max(0, Math.floor((cy - r) / TILE)); y <= Math.min(h - 1, Math.floor((cy + r) / TILE)); y++) {
+      for (let x = Math.max(0, Math.floor((cx - r) / TILE)); x <= Math.min(w - 1, Math.floor((cx + r) / TILE)); x++) {
+        const nx = Math.max(x * TILE, Math.min(cx, (x + 1) * TILE));
+        const ny = Math.max(y * TILE, Math.min(cy, (y + 1) * TILE));
+        if (Math.hypot(nx - cx, ny - cy) < r) out.push(y * w + x);
+      }
+    }
+    return out;
   }
 
   controlCost(control: ControlKind, large = false): number {
@@ -188,6 +215,14 @@ export class World {
       delete s.lanes;
       delete s.lanesSig;
       delete s.signs;
+      // The ring of a large roundabout covers the neighbouring tiles.
+      const spec = ringSpec(arms, large);
+      const n0 = nodes[0];
+      const c = n0.ringOf !== null ? this.network.roundabouts.get(tile)! : n0;
+      for (const t of this.tilesInCircle(c.x, c.y, spec.radius + spec.halfWidth + 1)) {
+        const b = this.buildingAt[t];
+        if (b >= 0) this.city.removeBuilding(b);
+      }
     } else delete s.roundaboutLarge;
     if (control !== 'signals') delete s.signalPlan;
     if (control !== 'priority') delete s.signs;
@@ -287,6 +322,7 @@ export class World {
     const oldNode = this.nodeSigs;
     this.network = this.compile();
     this.traffic?.setNetwork(this.network, this.junctions);
+    this.city?.onNetworkChanged();
     this.rememberSignatures();
     const dirty: TileRect[] = [];
     for (const [sig, r] of this.segSigs) if (!oldSeg.has(sig)) dirty.push(r);
@@ -338,5 +374,6 @@ export class World {
     this.clock.advance(dt);
     this.generator.step(dt);
     this.traffic.step(dt);
+    this.city.step(dt);
   }
 }

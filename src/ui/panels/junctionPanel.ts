@@ -24,7 +24,7 @@ const TURN_LABEL = ['Straight', 'Slight right', 'Right', 'Sharp right', 'U-turn'
 
 function locked(game: Game, need: number): boolean {
   const w = game.world;
-  return !!w && !w.sandbox && game.ui.population < need;
+  return !!w && !w.sandbox && game.ui.unlockPopulation < need;
 }
 
 /** Current (compiled) targets of an incoming lane as [outDir, outLaneIndex] pairs. */

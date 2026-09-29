@@ -36,6 +36,8 @@ export class UI {
   private el = {
     city: h('span', { class: 'city-name' }),
     pop: h('span', { class: 'value' }, '0'),
+    popGroup: h('div', { class: 'tb-group stat clickable', title: 'Population (click for city statistics)' }),
+    moneyGroup: h('div', { class: 'tb-group stat clickable', title: 'Money and change per day (click for the budget)' }),
     money: h('span', { class: 'value' }, '$0'),
     moneyDelta: h('span', { class: 'delta' }),
     clock: h('span', { class: 'value' }),
@@ -69,14 +71,16 @@ export class UI {
       'div',
       { class: 'topbar panel' },
       h('div', { class: 'tb-group' }, this.el.city),
-      h('div', { class: 'tb-group stat', title: 'Population' }, icon(ICONS.people), this.el.pop),
-      h('div', { class: 'tb-group stat', title: 'Money (change per day)' }, icon(ICONS.money), this.el.money, this.el.moneyDelta),
+      this.el.popGroup,
+      this.el.moneyGroup,
       h('div', { class: 'tb-group stat', title: 'Date and time' }, icon(ICONS.clock), this.el.clock),
       this.el.extra,
       h('div', { class: 'tb-spacer' }),
       h('div', { class: 'tb-group speed' }, ...this.el.speed),
       h('div', { class: 'tb-group' }, menuBtn),
     );
+    this.el.popGroup.append(icon(ICONS.people), this.el.pop);
+    this.el.moneyGroup.append(icon(ICONS.money), this.el.money, this.el.moneyDelta);
     this.layer.append(this.topBar);
 
     this.toolbar = h('div', { class: 'toolbar panel' });
@@ -279,7 +283,10 @@ export class UI {
       ['Esc / right click', 'Cancel or close'],
       ['Shift while dragging a road', 'Straight line'],
       ['Ctrl while dragging a road', 'Overpass (bridge over roads)'],
-      ['R · B · Z · J · L · T · I', 'Roads · Bulldoze · Zones · Junctions · Lanes · Transit · Inspect'],
+      ['R · Z · B', 'Roads · Zones · Bulldoze'],
+      ['J · L · K', 'Junctions · Lanes · Speed limits'],
+      ['V · C', 'Views · City statistics and budget'],
+      ['Click a building, car or road', 'Show details (with no tool selected)'],
     ];
     const body = h(
       'div',
@@ -322,8 +329,41 @@ export class UI {
     this.el.extra.append(el);
   }
 
-  population = 0;
-  moneyPerDay = 0;
+  /** Adds an element to the live stats area of the top bar. */
+  addExtra(el: HTMLElement, first = false): void {
+    if (first) this.el.extra.prepend(el);
+    else this.el.extra.append(el);
+  }
+
+  /** Reorders the main toolbar buttons by tool id (unknown ids are skipped). */
+  orderToolbar(ids: string[]): void {
+    for (const id of ids) {
+      const b = this.toolButtons.find((t) => t.def.id === id);
+      if (b) this.toolbar.append(b.el);
+    }
+  }
+
+  hasPanel(kind: string): boolean {
+    return this.panels.some((p) => p.dataset.kind === kind);
+  }
+
+  /** Makes the population and money stats open something when clicked. */
+  onStatClick(which: 'population' | 'money', fn: () => void): void {
+    (which === 'population' ? this.el.popGroup : this.el.moneyGroup).addEventListener('click', fn);
+  }
+
+  get population(): number {
+    return this.game.world?.city.population ?? 0;
+  }
+
+  /** Population that counts for unlocks: the highest ever reached, so features never lock again. */
+  get unlockPopulation(): number {
+    return this.game.world?.city.peakPopulation ?? 0;
+  }
+
+  get moneyPerDay(): number {
+    return this.game.world?.city.moneyPerDay ?? 0;
+  }
 
   private refresh(): void {
     const world = this.game.world;

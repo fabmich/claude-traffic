@@ -7,6 +7,7 @@ import { drawOutsideMarkers } from '../render/markers';
 import { drawJunctionDelays, drawSpeedSigns } from '../render/overlays';
 import { Renderer } from '../render/Renderer';
 import { drawCongestion, drawSignals, drawVehicles } from '../render/vehicleDraw';
+import { setupCityUI, type CityToolset } from '../ui/cityUI';
 import { openSelectionPanel } from '../ui/panels/inspectPanels';
 import { setupToolbar } from '../ui/toolbarSetup';
 import { setupTrafficTools, type TrafficToolset } from '../ui/trafficToolsSetup';
@@ -24,7 +25,7 @@ export type GameEvents = {
   overlay: string;
 };
 
-export type OverlayKind = 'none' | 'traffic' | 'delays' | 'speed';
+export type OverlayKind = 'none' | 'traffic' | 'delays' | 'speed' | 'happiness';
 
 /** Browser shell around a World: owns the render loop, input, tools and UI. */
 export class Game {
@@ -43,6 +44,7 @@ export class Game {
   private lastT = 0;
   readonly tools: ReturnType<typeof setupToolbar>;
   readonly trafficTools: TrafficToolset;
+  readonly cityTools: CityToolset;
 
   constructor(readonly root: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -76,6 +78,7 @@ export class Game {
     this.renderer.overlayDrawers.push((ctx, r) => this.activeTool.drawOverlay?.(ctx, r));
     this.tools = setupToolbar(this);
     this.trafficTools = setupTrafficTools(this);
+    this.cityTools = setupCityUI(this);
     this.events.on('select', (sel) => openSelectionPanel(this, sel));
   }
 

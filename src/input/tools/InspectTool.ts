@@ -9,6 +9,7 @@ export type Selection =
   | { kind: 'vehicle'; vehicle: Vehicle }
   | { kind: 'node'; tile: number }
   | { kind: 'segment'; key: string }
+  | { kind: 'building'; id: number }
   | null;
 
 /** Default tool: click vehicles, junctions and roads to see details. */
@@ -30,6 +31,13 @@ export class InspectTool implements Tool {
     if (v) {
       this.select({ kind: 'vehicle', vehicle: v });
       return;
+    }
+    if (world.map.inBounds(p.tx, p.ty)) {
+      const b = world.buildingAt[p.ty * world.map.w + p.tx];
+      if (b >= 0) {
+        this.select({ kind: 'building', id: b });
+        return;
+      }
     }
     const node = this.nodeAt(p.wx, p.wy);
     if (node) {
@@ -139,6 +147,14 @@ export class InspectTool implements Tool {
         if (n) ctx.arc(n.x, n.y, TILE * 0.62, 0, Math.PI * 2);
       }
       ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (sel.kind === 'building') {
+      const b = world.city.buildings[sel.id];
+      if (!b) return;
+      ctx.strokeStyle = 'rgba(80, 170, 255, 0.95)';
+      ctx.lineWidth = Math.max(0.8, 2.2 / r.camera.zoom);
+      ctx.setLineDash([4, 2.5]);
+      ctx.strokeRect(b.x0 * TILE + 0.5, b.y0 * TILE + 0.5, (b.x1 - b.x0 + 1) * TILE - 1, (b.y1 - b.y0 + 1) * TILE - 1);
       ctx.setLineDash([]);
     } else if (sel.kind === 'segment') {
       const seg = world.network.segByKey.get(sel.key);

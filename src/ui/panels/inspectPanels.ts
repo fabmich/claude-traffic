@@ -5,6 +5,7 @@ import { ROAD_TYPES } from '../../roads/roadTypes';
 import { VKind } from '../../sim/params';
 import type { Vehicle } from '../../sim/vehicle';
 import { h } from '../dom';
+import { openBuildingPanel } from './buildingPanel';
 import { kvList, makePanel } from './panel';
 
 const KIND_NAMES = ['Car', 'Truck', 'Bus'];
@@ -30,7 +31,7 @@ function vehicleStatus(game: Game, v: Vehicle): string {
 export function openVehiclePanel(game: Game, v: Vehicle): void {
   let follow = false;
   const handle = makePanel(`${KIND_NAMES[v.kind]} #${v.id}`, () => game.tools.inspect.select(null));
-  const kv = kvList(['Status', 'Speed', 'Speed limit', 'Driven', 'Trip time', 'Destination', 'Route legs left']);
+  const kv = kvList(['Status', 'Speed', 'Speed limit', 'Driven', 'Trip time', 'Trip', 'Route legs left']);
   const followBtn = h('button', { class: 'btn small', type: 'button' }, 'Follow');
   followBtn.addEventListener('click', () => {
     follow = !follow;
@@ -51,7 +52,7 @@ export function openVehiclePanel(game: Game, v: Vehicle): void {
       `${Math.round(limit * 3.6)} km/h`,
       `${(v.distanceDriven / 1000).toFixed(2)} km`,
       `${Math.round(world.traffic.time - v.spawnTime)} s`,
-      v.dest?.outside ? 'Leaving the city' : v.kind === VKind.Bus ? 'Bus route' : 'Destination in the city',
+      typeof v.tripData === 'string' ? v.tripData : v.dest?.outside ? 'Leaving the city' : v.kind === VKind.Bus ? 'Bus route' : 'Test trip',
       String(Math.max(0, v.route.length - v.routeIdx - 1)),
     ]);
     if (follow) {
@@ -134,6 +135,7 @@ export function openSelectionPanel(game: Game, sel: Selection): void {
   }
   if (sel.kind === 'vehicle') openVehiclePanel(game, sel.vehicle);
   else if (sel.kind === 'node') game.events.emit('openJunction', sel.tile);
+  else if (sel.kind === 'building') openBuildingPanel(game, sel.id);
   else openSegmentPanelHook(game, sel.key);
 }
 
