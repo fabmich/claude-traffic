@@ -25,6 +25,14 @@ export const CITY = {
   realTripShare: 0.6,
   walkDistance: 650,
   truckLoad: 25,
+  /** Money: taxes per employed resident and day, per sale, crop and good (at 9%), export price per unit. */
+  incomeTax: 2.6,
+  saleTax: 1,
+  cropTax: 0.5,
+  goodsTax: 0.6,
+  exportPrice: 1.2,
+  /** Multiplier on the road types' upkeep. */
+  roadUpkeep: 1.8,
   /** Freight rates per worker and game hour. */
   farmOutput: 0.25,
   factoryCropUse: 0.1,
@@ -327,7 +335,7 @@ export class City {
       if (t) up += ROAD_TYPES[t].upkeep * ((e & 3) % 2 === 1 ? Math.SQRT2 : 1);
     }
     for (const s of roads.spans.values()) up += ROAD_TYPES[s.type].upkeep * s.len * (s.kind === 'bridge' ? 3 : 4);
-    this.roadUpkeepPerDay = up;
+    this.roadUpkeepPerDay = up * CITY.roadUpkeep;
     let j = 0;
     for (const [, st] of this.world.junctions.entries()) {
       if (st.control === 'signals') j += 20;
@@ -343,6 +351,11 @@ export class City {
       b.accessDirty = false;
     }
     return b.access;
+  }
+
+  /** True if any road network touches a highway exit. */
+  get connected(): boolean {
+    return this.outsideComps.size > 0;
   }
 
   connectedToOutside(b: Building): boolean {
@@ -716,7 +729,7 @@ export class City {
         to.sales++;
         c.shopNeed = 0;
         c.home.shopOk = c.home.shopOk * 0.8 + 0.2;
-        this.budgetToday.commercial += 0.8 * (this.taxes.c / 9);
+        this.budgetToday.commercial += CITY.saleTax * (this.taxes.c / 9);
       } else {
         c.home.shopOk = c.home.shopOk * 0.8;
         c.shopNeed = 0.6;
@@ -928,7 +941,7 @@ export class City {
         b.reserved = Math.max(0, b.reserved - load);
         if (b.zone === Zone.Farming) b.crops = Math.max(0, b.crops - load);
         else b.goods = Math.max(0, b.goods - load);
-        this.budgetToday.exports += load * 2.2;
+        this.budgetToday.exports += load * CITY.exportPrice;
       }, false, b.zone === Zone.Farming ? 'Exporting crops' : 'Exporting goods');
       if (!ok) b.reserved -= load;
     }
@@ -1009,7 +1022,7 @@ export class City {
       b.happiness += (Math.max(0, Math.min(100, h)) - b.happiness) * Math.min(1, hours * 0.35);
       if (b.happiness < 35) b.problems |= Problem.Unhappy;
       if (mins > 5) b.problems |= Problem.LongCommute;
-      this.budgetToday.residential += employed * 3 * (tax.r / 9) * day;
+      this.budgetToday.residential += employed * CITY.incomeTax * (tax.r / 9) * day;
       if (b.happiness >= 72) b.goodTime += day;
       else b.goodTime = Math.max(0, b.goodTime - day * 0.5);
       if (b.happiness < 30) b.badTime += day;
@@ -1030,7 +1043,7 @@ export class City {
       const add = staff * CITY.farmOutput * hours;
       b.crops = Math.min(40 * lvl, b.crops + add);
       b.produced += add;
-      this.budgetToday.farming += add * 0.7 * (tax.f / 9);
+      this.budgetToday.farming += add * CITY.cropTax * (tax.f / 9);
     } else if (b.zone === Zone.Industrial) {
       const fromRich = staff * CITY.richOutput * b.rich * hours;
       const use = Math.min(b.crops, staff * CITY.factoryCropUse * (1 - b.rich) * hours);
@@ -1038,12 +1051,13 @@ export class City {
       const add = fromRich + use * CITY.goodsPerCrop;
       b.goods = Math.min(60 * lvl, b.goods + add);
       b.produced += add;
-      this.budgetToday.industrial += add * 0.9 * (tax.i / 9);
+      this.budgetToday.industrial += add * CITY.goodsTax * (tax.i / 9);
       if (b.rich < 0.5 && b.crops < 1 && b.incoming <= 0 && staff > 0 && settled) b.problems |= Problem.NoInputs;
     } else if (b.zone === Zone.Commercial) {
       if (b.goods < 1 && settled) b.problems |= Problem.NoGoods;
       b.sales = Math.max(0, b.sales - staff * 0.1 * hours);
-      if (b.customers < b.capacity * 0.5 * day * 24 && staff > 0 && b.age > 0.6) b.problems |= Problem.NoCustomers;
+      // Customers is a decaying count of recent visits; only nearly empty shops complain.
+      if (b.customers < b.capacity * 0.05 && staff > 0 && b.age > 1) b.problems |= Problem.NoCustomers;
       b.customers = Math.max(0, b.customers * (1 - 0.2 * hours));
     }
     const healthy = staffing >= 0.85 && !(b.problems & (Problem.NoGoods | Problem.NoInputs | Problem.NoRoad));

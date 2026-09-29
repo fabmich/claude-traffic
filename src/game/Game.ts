@@ -10,6 +10,7 @@ import { drawCongestion, drawSignals, drawVehicles } from '../render/vehicleDraw
 import type { Line, Stop } from '../transit/Transit';
 import { setupCityUI, type CityToolset } from '../ui/cityUI';
 import { setupSaveUI } from '../ui/saveUI';
+import { setupTips } from '../ui/tipsUI';
 import { openSelectionPanel } from '../ui/panels/inspectPanels';
 import { setupToolbar } from '../ui/toolbarSetup';
 import { setupTrafficTools, type TrafficToolset } from '../ui/trafficToolsSetup';
@@ -93,6 +94,7 @@ export class Game {
     this.cityTools = setupCityUI(this);
     this.transitTools = setupTransitUI(this);
     setupSaveUI(this);
+    setupTips(this);
     this.applySettings(this.settings);
     this.events.on('select', (sel) => openSelectionPanel(this, sel));
   }
