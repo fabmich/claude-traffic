@@ -284,7 +284,8 @@ export class UI {
       ['Shift while dragging a road', 'Straight line'],
       ['Ctrl while dragging a road', 'Overpass (bridge over roads)'],
       ['R · Z · B', 'Roads · Zones · Bulldoze'],
-      ['J · L · K', 'Junctions · Lanes · Speed limits'],
+      ['J · L · K · T', 'Junctions · Lanes · Speed limits · Transit'],
+      ['Enter / Backspace while drawing a bus line', 'Finish the line / remove the last stop'],
       ['V · C', 'Views · City statistics and budget'],
       ['Click a building, car or road', 'Show details (with no tool selected)'],
     ];

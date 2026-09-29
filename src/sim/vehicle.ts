@@ -21,6 +21,12 @@ export interface Destination {
 
 export type TripHandler = (v: Vehicle, arrived: boolean) => void;
 
+/**
+ * Called when a vehicle reaches its destination. Returning a number keeps the vehicle stopped there
+ * for that many seconds (the handler usually gives it a new destination); null ends the trip.
+ */
+export type StopHandler = (v: Vehicle) => number | null;
+
 export class Vehicle {
   /** Index in the simulation's vehicle list (for O(1) removal). */
   listIndex = -1;
@@ -68,8 +74,9 @@ export class Vehicle {
   dest: Destination | null = null;
   /** Connector chosen at the upcoming junction. */
   nextConn: Connector | null = null;
-  /** Connector this vehicle has been allowed to enter. */
+  /** Connector this vehicle has been allowed to enter, and when. */
   granted: Connector | null = null;
+  grantTime = 0;
   needsReroute = false;
   lastRoute = 0;
 
@@ -86,8 +93,13 @@ export class Vehicle {
 
   // Trip bookkeeping
   onTrip: TripHandler | null = null;
+  onStop: StopHandler | null = null;
+  /** Seconds left standing at a stop (buses). */
+  dwell = 0;
   tripData: unknown = null;
   spawnTime = 0;
+  /** Expected trip time on empty roads (for the traffic flow statistic). */
+  freeTime = 0;
   /** Stored for route display. */
   distanceDriven = 0;
 

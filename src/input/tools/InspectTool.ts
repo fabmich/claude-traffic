@@ -32,6 +32,12 @@ export class InspectTool implements Tool {
       this.select({ kind: 'vehicle', vehicle: v });
       return;
     }
+    const stop = world.transit.stopAt(p.wx, p.wy, 5 + 4 / this.game.renderer.camera.zoom);
+    if (stop) {
+      this.select(null);
+      this.game.events.emit('openStop', stop);
+      return;
+    }
     if (world.map.inBounds(p.tx, p.ty)) {
       const b = world.buildingAt[p.ty * world.map.w + p.tx];
       if (b >= 0) {

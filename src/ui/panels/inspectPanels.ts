@@ -12,6 +12,7 @@ const KIND_NAMES = ['Car', 'Truck', 'Bus'];
 
 function vehicleStatus(game: Game, v: Vehicle): string {
   const world = game.world!;
+  if (v.dwell > 0) return 'Stopped at a bus stop';
   if (v.conn) return 'Crossing a junction';
   if (v.layer === 1) return 'On a bridge';
   if (v.layer === -1) return 'In a tunnel';
@@ -27,11 +28,17 @@ function vehicleStatus(game: Game, v: Vehicle): string {
   return 'Driving';
 }
 
+function busRows(game: Game, v: Vehicle): string[] {
+  const info = game.world?.transit.busInfo(v);
+  return info ? [`${info.riders} / 40`, info.next?.name ?? '-'] : ['-', '-'];
+}
+
 /** Live info panel for a selected vehicle; the camera can follow it. */
 export function openVehiclePanel(game: Game, v: Vehicle): void {
   let follow = false;
   const handle = makePanel(`${KIND_NAMES[v.kind]} #${v.id}`, () => game.tools.inspect.select(null));
-  const kv = kvList(['Status', 'Speed', 'Speed limit', 'Driven', 'Trip time', 'Trip', 'Route legs left']);
+  const bus = game.world?.transit.busInfo(v) ?? null;
+  const kv = kvList(['Status', 'Speed', 'Speed limit', 'Driven', 'Trip time', 'Trip', 'Route legs left', ...(bus ? ['Passengers', 'Next stop'] : [])]);
   const followBtn = h('button', { class: 'btn small', type: 'button' }, 'Follow');
   followBtn.addEventListener('click', () => {
     follow = !follow;
@@ -42,7 +49,7 @@ export function openVehiclePanel(game: Game, v: Vehicle): void {
   const refresh = (): void => {
     const world = game.world;
     if (!world || v.listIndex < 0) {
-      kv.set(['Arrived or removed', '-', '-', '-', '-', '-', '-']);
+      kv.set(['Arrived or removed', '-', '-', '-', '-', '-', '-', ...(bus ? ['-', '-'] : [])]);
       return;
     }
     const limit = v.lane ? v.lane.speedLimit : v.conn ? v.conn.maxSpeed : 0;
@@ -54,6 +61,7 @@ export function openVehiclePanel(game: Game, v: Vehicle): void {
       `${Math.round(world.traffic.time - v.spawnTime)} s`,
       typeof v.tripData === 'string' ? v.tripData : v.dest?.outside ? 'Leaving the city' : v.kind === VKind.Bus ? 'Bus route' : 'Test trip',
       String(Math.max(0, v.route.length - v.routeIdx - 1)),
+      ...(bus ? busRows(game, v) : []),
     ]);
     if (follow) {
       const cam = game.renderer.camera;

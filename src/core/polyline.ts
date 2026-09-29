@@ -38,6 +38,29 @@ export class Polyline {
     return new Polyline(xs, ys);
   }
 
+  /** Closest point to (x, y): arc length, distance and heading there. */
+  project(x: number, y: number): { s: number; d: number; a: number } {
+    let bs = 0;
+    let bd = Infinity;
+    let ba = 0;
+    for (let i = 0; i < this.n - 1; i++) {
+      const ax = this.xs[i];
+      const ay = this.ys[i];
+      const dx = this.xs[i + 1] - ax;
+      const dy = this.ys[i + 1] - ay;
+      const l2 = dx * dx + dy * dy;
+      if (l2 === 0) continue;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+      const d = Math.hypot(ax + dx * t - x, ay + dy * t - y);
+      if (d < bd) {
+        bd = d;
+        bs = this.cum[i] + t * (this.cum[i + 1] - this.cum[i]);
+        ba = Math.atan2(dy, dx);
+      }
+    }
+    return { s: bs, d: bd, a: ba };
+  }
+
   /** Index i such that cum[i] <= s < cum[i + 1] (clamped). */
   locate(s: number, hint = -1): number {
     const cum = this.cum;

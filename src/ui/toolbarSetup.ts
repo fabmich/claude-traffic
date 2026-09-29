@@ -164,11 +164,12 @@ export function setupToolbar(game: Game): Toolset {
       ['delays', 'Junction delays', 'Average waiting time at each junction'],
       ['speed', 'Speed limits', 'Show the speed limit of every road'],
       ['happiness', 'Happiness', 'Colour buildings by happiness (green = happy, red = unhappy)'],
-    ] as Array<['delays' | 'speed' | 'happiness', string, string]>) {
+      ['lines', 'Bus lines', 'Show the routes of all bus lines'],
+    ] as Array<['delays' | 'speed' | 'happiness' | 'lines', string, string]>) {
       host.append(
         subButton({
           label,
-          icon: kind === 'delays' ? ICONS.clock : kind === 'speed' ? ICONS.speed : ICONS.people,
+          icon: kind === 'delays' ? ICONS.clock : kind === 'speed' ? ICONS.speed : kind === 'lines' ? ICONS.bus : ICONS.people,
           sub: game.overlay === kind ? 'on' : 'off',
           title,
           active: game.overlay === kind,

@@ -11,6 +11,7 @@ import { ROAD } from '../roads/roadTypes';
 import { armsSignature, JunctionSettings, type JunctionSetting, type SignalPlanSetting, type SignKind } from '../roads/settings';
 import { TrafficGenerator } from '../sim/generator';
 import { TrafficSim } from '../sim/Traffic';
+import { Transit } from '../transit/Transit';
 import { DX, DY } from '../world/grid';
 import { generateMap } from '../world/mapgen';
 import type { WorldMap } from '../world/WorldMap';
@@ -55,6 +56,7 @@ export class World {
   readonly traffic: TrafficSim;
   readonly generator: TrafficGenerator;
   readonly city: City;
+  readonly transit: Transit;
   money: number;
   private compileCache = new CompileCache();
   private segSigs = new Map<string, TileRect>();
@@ -78,6 +80,7 @@ export class World {
     );
     this.city = new City(this);
     this.city.events.on('tiles', (rects) => this.events.emit('tiles', rects));
+    this.transit = new Transit(this);
   }
 
   get sandbox(): boolean {
@@ -323,6 +326,7 @@ export class World {
     this.network = this.compile();
     this.traffic?.setNetwork(this.network, this.junctions);
     this.city?.onNetworkChanged();
+    this.transit?.onNetworkChanged();
     this.rememberSignatures();
     const dirty: TileRect[] = [];
     for (const [sig, r] of this.segSigs) if (!oldSeg.has(sig)) dirty.push(r);
@@ -375,5 +379,6 @@ export class World {
     this.generator.step(dt);
     this.traffic.step(dt);
     this.city.step(dt);
+    this.transit.step(dt);
   }
 }

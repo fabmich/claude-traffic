@@ -203,3 +203,69 @@ test('zoning near a road from the highway grows a town', async ({ page }) => {
   await expect(page.locator('.demand-bar')).toHaveCount(4);
   expect(errors).toEqual([]);
 });
+
+test('bus line drawn with the transit tools runs buses', async ({ page }) => {
+  const errors: string[] = [];
+  await startGame(page, errors, { seed: 8, sandbox: true });
+  const exit = await page.evaluate(() => {
+    const m = (window as unknown as G).__game.world.map;
+    const DX = [1, 1, 0, -1, -1, -1, 0, 1];
+    const DY = [0, 1, 1, 1, 0, -1, -1, -1];
+    const oc = m.outside[0];
+    return { x: oc.x + DX[oc.dir] * oc.length, y: oc.y + DY[oc.dir] * oc.length, dx: DX[oc.dir], dy: DY[oc.dir] };
+  });
+  const at = (k: number, side: number): [number, number] => [exit.x + exit.dx * k - exit.dy * side, exit.y + exit.dy * k + exit.dx * side];
+  await page.evaluate(
+    ([x, y]) => {
+      const c = (window as unknown as G).__game.renderer.camera;
+      c.x = (x + 0.5) * 24;
+      c.y = (y + 0.5) * 24;
+      c.setZoom(Math.min(c.viewW, c.viewH - 250) / (16 * 24));
+    },
+    at(6, 2),
+  );
+  await page.waitForTimeout(300);
+  // A block of streets: the road from the exit and a loop beside it.
+  await page.keyboard.press('r');
+  await dragTiles(page, at(0, 0), at(12, 0));
+  await dragTiles(page, at(3, 0), at(3, 5));
+  await dragTiles(page, at(3, 5), at(10, 5));
+  await dragTiles(page, at(10, 5), at(10, 0));
+  await page.keyboard.press('Escape');
+  // Draw a line by clicking street sides (each click adds a stop).
+  await page.keyboard.press('t');
+  await page.locator('.subtoolbar .tool-btn', { hasText: 'New line' }).click();
+  const clickSide = async (tile: [number, number], side: number): Promise<void> => {
+    const [sx, sy] = await page.evaluate(
+      ([tx, ty, ox, oy]) => {
+        const c = (window as unknown as G).__game.renderer.camera;
+        return [c.worldToScreenX((tx + 0.5) * 24 + ox), c.worldToScreenY((ty + 0.5) * 24 + oy)];
+      },
+      [tile[0], tile[1], -exit.dy * side * 4, exit.dx * side * 4],
+    );
+    await page.mouse.click(sx, sy);
+  };
+  await clickSide(at(6, 0), 1);
+  await clickSide(at(3, 3), 0.01);
+  await clickSide(at(7, 5), -1);
+  await page.keyboard.press('Enter');
+  const line = await page.evaluate(() => {
+    const t = (window as unknown as G).__game.world.transit;
+    return { lines: t.lines.length as number, stops: t.stops.length as number, broken: t.lines[0]?.broken as boolean };
+  });
+  expect(line.lines).toBe(1);
+  expect(line.stops).toBeGreaterThanOrEqual(2);
+  expect(line.broken).toBe(false);
+  await expect(page.locator('.side-panel h3')).toContainText('Line 1');
+  const buses = await page.evaluate(() => {
+    const w = (window as unknown as G).__game.world;
+    let max = 0;
+    for (let i = 0; i < 1500; i++) {
+      w.step(0.1);
+      max = Math.max(max, w.traffic.vehicles.filter((v: { kind: number }) => v.kind === 2).length);
+    }
+    return max;
+  });
+  expect(buses).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});

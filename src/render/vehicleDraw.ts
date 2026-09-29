@@ -31,8 +31,8 @@ export function drawVehicles(ctx: CanvasRenderingContext2D, r: Renderer, traffic
     ctx.globalAlpha = v.layer === -1 ? 0.28 : 1;
     if (dots) {
       ctx.setTransform(S, 0, 0, S, ox, oy);
-      ctx.fillStyle = v.kind === VKind.Bus ? '#f2c230' : v.color;
-      const d = Math.max(2.6, 3.2 / cam.zoom);
+      ctx.fillStyle = v.color;
+      const d = Math.max(2.6, 3.2 / cam.zoom) * (v.kind === VKind.Bus ? 1.6 : 1);
       ctx.fillRect(x - d / 2, y - d / 2, d, d);
       continue;
     }

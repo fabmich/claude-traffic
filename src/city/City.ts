@@ -21,9 +21,15 @@ export const CITY = {
   carOwnership: 0.85,
   workerShare: 0.75,
   /** Share of car trips simulated with real vehicles (the rest are instant "virtual" trips). */
-  realTripShare: 0.75,
+  realTripShare: 0.6,
   walkDistance: 650,
-  truckLoad: 10,
+  truckLoad: 25,
+  /** Freight rates per worker and game hour. */
+  farmOutput: 0.25,
+  factoryCropUse: 0.1,
+  /** Goods a factory makes per crop, and per worker-hour from rich ground. */
+  goodsPerCrop: 1.8,
+  richOutput: 0.2,
   milestones: [
     { pop: 300, name: 'Village', reward: 10_000 },
     { pop: 1000, name: 'Town', reward: 20_000 },
@@ -69,7 +75,7 @@ export class Citizen {
     rng: Rng,
   ) {
     this.shopNeed = rng.next() * 0.8;
-    this.startHour = 6 + rng.next() * 3.5;
+    this.startHour = 5.5 + rng.next() * 4.5;
     this.shift = 7 + rng.next() * 2;
   }
 }
@@ -591,12 +597,14 @@ export class City {
       return;
     }
     const dist = Math.hypot(from.cx - to.cx, from.cy - to.cy);
-    if (this.transitPlanner && this.transitPlanner(c, from, to, dist)) {
+    // Short trips are often walked; otherwise the bus competes with the car (or with a long walk).
+    const walkShort = dist < CITY.walkDistance && this.rng.chance(0.55);
+    if (!walkShort && this.transitPlanner && this.transitPlanner(c, from, to, dist)) {
       c.mode = 'bus';
       this.modeCounts.bus++;
       return;
     }
-    if (!c.car || (dist < CITY.walkDistance && this.rng.chance(0.55))) {
+    if (!c.car || walkShort) {
       c.mode = 'walk';
       this.modeCounts.walk++;
       this.virtualTrip(c, (dist * 1.3) / 1.4);
@@ -809,7 +817,7 @@ export class City {
     };
     // Shops order goods from factories, or import them.
     for (const s of shops) {
-      if (s.goods + s.incoming >= 6 * s.level + 4) continue;
+      if (s.goods + s.incoming >= 4 * s.level + 8) continue;
       const f = nearest(factories, s, (b) => b.goods - b.reserved >= load);
       if (f) {
         f.reserved += load;
@@ -836,7 +844,7 @@ export class City {
     }
     // Factories without rich ground need crops.
     for (const f of factories) {
-      if (f.rich >= 0.75 || f.crops + f.incoming >= 12) continue;
+      if (f.rich >= 0.75 || f.crops + f.incoming >= load) continue;
       const farm = nearest(farms, f, (b) => b.crops - b.reserved >= load);
       if (farm) {
         farm.reserved += load;
@@ -864,15 +872,15 @@ export class City {
     // Surplus is exported.
     for (const b of [...farms, ...factories]) {
       const stock = b.zone === Zone.Farming ? b.crops : b.goods;
-      if (stock - b.reserved < 30 * b.level || !this.connectedToOutside(b)) continue;
-      b.reserved += load * 2;
+      if (stock - b.reserved < load + 12 * b.level || !this.connectedToOutside(b)) continue;
+      b.reserved += load;
       const ok = this.truck(b, null, () => {
-        b.reserved = Math.max(0, b.reserved - load * 2);
-        if (b.zone === Zone.Farming) b.crops = Math.max(0, b.crops - load * 2);
-        else b.goods = Math.max(0, b.goods - load * 2);
-        this.budgetToday.exports += load * 2 * 1.5;
+        b.reserved = Math.max(0, b.reserved - load);
+        if (b.zone === Zone.Farming) b.crops = Math.max(0, b.crops - load);
+        else b.goods = Math.max(0, b.goods - load);
+        this.budgetToday.exports += load * 2.2;
       }, false, b.zone === Zone.Farming ? 'Exporting crops' : 'Exporting goods');
-      if (!ok) b.reserved -= load * 2;
+      if (!ok) b.reserved -= load;
     }
   }
 
@@ -969,18 +977,18 @@ export class City {
     if (staffing < 0.5 && settled) b.problems |= Problem.NoWorkers;
     const lvl = b.level;
     if (b.zone === Zone.Farming) {
-      const add = staff * 0.55 * hours;
+      const add = staff * CITY.farmOutput * hours;
       b.crops = Math.min(40 * lvl, b.crops + add);
       b.produced += add;
-      this.budgetToday.farming += add * 0.3 * (tax.f / 9);
+      this.budgetToday.farming += add * 0.7 * (tax.f / 9);
     } else if (b.zone === Zone.Industrial) {
-      const fromRich = staff * 0.4 * b.rich * hours;
-      const use = Math.min(b.crops, staff * 0.5 * (1 - b.rich) * hours);
+      const fromRich = staff * CITY.richOutput * b.rich * hours;
+      const use = Math.min(b.crops, staff * CITY.factoryCropUse * (1 - b.rich) * hours);
       b.crops -= use;
-      const add = fromRich + use * 1.3;
+      const add = fromRich + use * CITY.goodsPerCrop;
       b.goods = Math.min(60 * lvl, b.goods + add);
       b.produced += add;
-      this.budgetToday.industrial += add * 0.35 * (tax.i / 9);
+      this.budgetToday.industrial += add * 0.9 * (tax.i / 9);
       if (b.rich < 0.5 && b.crops < 1 && b.incoming <= 0 && staff > 0 && settled) b.problems |= Problem.NoInputs;
     } else if (b.zone === Zone.Commercial) {
       if (b.goods < 1 && settled) b.problems |= Problem.NoGoods;
@@ -1084,8 +1092,8 @@ export class City {
     const r = attract - freeHomes / Math.max(25, pop * 0.3);
     const target = {
       r: clamp(r),
-      c: clamp(((0.25 * workers + 4 - cJobs) / Math.max(8, 0.12 * workers)) * 0.6 + u * 1.2 - (t.c - 9) / 18),
-      i: clamp(((0.55 * workers + 6 - iJobs) / Math.max(10, 0.2 * workers)) * 0.6 + u * 1.5 - (t.i - 9) / 18),
+      c: clamp(((0.28 * workers + 4 - cJobs) / Math.max(8, 0.12 * workers)) * 0.6 + u * 1.2 - (t.c - 9) / 18),
+      i: clamp(((0.5 * workers + 6 - iJobs) / Math.max(10, 0.2 * workers)) * 0.6 + u * 1.5 - (t.i - 9) / 18),
       f: clamp(((0.15 * workers + 3 - fJobs) / Math.max(6, 0.1 * workers)) * 0.5 + u * 0.8 - (t.f - 9) / 18),
     };
     for (const k of ['r', 'c', 'i', 'f'] as const) this.demand[k] += (target[k] - this.demand[k]) * 0.3;

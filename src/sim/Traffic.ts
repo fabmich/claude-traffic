@@ -6,7 +6,7 @@ import type { JunctionSettings } from '../roads/settings';
 import { JunctionControl } from './junctions';
 import { B_MAX, CAR_COLORS, KIND_PARAMS, TRUCK_COLORS, VKind, type VKindId } from './params';
 import { dsOf, dsOfLane, Router } from './routing';
-import { Vehicle, type Destination, type Leg, type TripHandler } from './vehicle';
+import { Vehicle, type Destination, type Leg, type StopHandler, type TripHandler } from './vehicle';
 
 export interface TrafficSettings {
   despawnStuck: boolean;
@@ -25,6 +25,10 @@ export interface SpawnRequest {
   origins: SpawnOrigin[];
   dests: Destination[];
   onTrip?: TripHandler;
+  /** Keeps the vehicle alive at its destination (buses). */
+  onStop?: StopHandler;
+  /** Called with the vehicle once it has entered the road. */
+  onSpawn?: (v: Vehicle) => void;
   data?: unknown;
   color?: string;
   /** Called if the vehicle could not be spawned (no route or no gap for too long). */
@@ -37,7 +41,7 @@ export interface TrafficStats {
   arrived: number;
   despawnedStuck: number;
   noRoute: number;
-  /** Average of speed / desired speed over moving and waiting vehicles (0..1). */
+  /** Recent trips: time on empty roads divided by the actual trip time (0..1). */
   flow: number;
 }
 
@@ -256,8 +260,10 @@ export class TrafficSim {
     v.routeIdx = 0;
     v.dest = res.dest;
     v.onTrip = req.onTrip ?? null;
+    v.onStop = req.onStop ?? null;
     v.tripData = req.data ?? null;
     v.spawnTime = this.time;
+    v.freeTime = this.freeTime(res.legs, s, res.dest, kind);
     v.lastRoute = this.time;
     v.lane = best;
     v.s = Math.min(s, best.length - 0.1);
@@ -270,7 +276,44 @@ export class TrafficSim {
     v.py = v.y;
     v.pHeading = v.heading;
     this.stats.spawned++;
+    req.onSpawn?.(v);
     return 'ok';
+  }
+
+  /**
+   * Trip time along a route without any other traffic: speed limits, speeding up after the start
+   * and each turn, and slowing down for turns and parking.
+   */
+  private freeTime(legs: Leg[], s0: number, dest: Destination, kind: VKindId): number {
+    const p = KIND_PARAMS[kind];
+    let t = 0;
+    let vIn = 0;
+    for (let i = 0; i < legs.length; i++) {
+      const lanes = legs[i].forward ? legs[i].seg.forward : legs[i].seg.backward;
+      const lane = lanes[0];
+      if (!lane) continue;
+      const last = i === legs.length - 1;
+      const vf = Math.max(2, Math.min(legs[i].seg.speedLimit, p.vMax) * 0.96);
+      if (i === 0) vIn = Math.min(vf * 0.5, 8);
+      let vOut = vf;
+      if (last) vOut = dest.outside ? vf : 3;
+      else {
+        const next = legs[i + 1];
+        const c = lane.outs.find((o) => o.to.segment === next.seg && o.to.forward === next.forward);
+        if (c) {
+          vOut = Math.min(vf, c.maxSpeed);
+          t += c.length / Math.max(2, c.maxSpeed);
+        }
+      }
+      const from = i === 0 ? s0 : 0;
+      const to = last && !dest.outside ? dest.s : lane.length;
+      const L = Math.max(0, to - from);
+      const up = Math.max(0, vf - vIn);
+      const down = Math.max(0, vf - vOut);
+      t += L / vf + (up * up) / (2 * p.a * vf) + (down * down) / (2 * p.b * vf);
+      vIn = Math.min(vf, vOut);
+    }
+    return t + 2;
   }
 
   /** Free space around position s on a lane for a vehicle of `length` (<= 0 means blocked). */
@@ -311,6 +354,10 @@ export class TrafficSim {
     v.listIndex = -1;
     v.lane = null;
     v.conn = null;
+    if (v.kind !== VKind.Bus && v.freeTime > 0) {
+      const sample = arrived ? Math.min(1, v.freeTime / Math.max(1, this.time - v.spawnTime)) : 0.1;
+      this.stats.flow += (sample - this.stats.flow) * 0.04;
+    }
     if (arrived) this.stats.arrived++;
     else this.onRemoved?.(v, reason);
     v.onTrip?.(v, arrived);
@@ -323,10 +370,42 @@ export class TrafficSim {
 
   // ---------------------------------------------------------------- routing helpers
 
+  /**
+   * Replans from the end of the current lane using only the turns this lane allows (the driver
+   * misses the planned turn instead of blocking the road). Used when changing lanes is impossible.
+   */
+  private rerouteFromLane(v: Vehicle): boolean {
+    const lane = v.lane;
+    if (!lane || !v.dest) return false;
+    let best: { c: Connector; legs: Leg[]; dest: Destination; cost: number } | null = null;
+    for (const c of lane.outs) {
+      if (!this.allowed(v, c.to)) continue;
+      const res = this.router.route(v.kind, [{ ds: dsOfLane(c.to), s: 0 }], [v.dest], v.seed, v.vMax);
+      if (!res) continue;
+      const cost = res.cost + c.length / Math.max(2, c.maxSpeed);
+      if (!best || cost < best.cost) best = { c, legs: res.legs, dest: res.dest, cost };
+    }
+    if (!best) return false;
+    v.route = [{ seg: lane.segment, forward: lane.forward }, ...best.legs];
+    v.routeIdx = 0;
+    v.dest = best.dest;
+    v.nextConn = best.c;
+    v.blockedTime = 0;
+    v.needsReroute = false;
+    v.lastRoute = this.time;
+    if (v.mergeTarget) {
+      this.removeFrom(v.mergeTarget.mergers, v);
+      v.mergeTarget = null;
+    }
+    return true;
+  }
+
   private reroute(v: Vehicle): boolean {
     v.needsReroute = false;
     v.lastRoute = this.time;
     if (!v.lane || !v.dest) return false;
+    // Too close to the junction to change lanes: only turns from this lane are possible.
+    if (v.lane.length - v.s < 30 && v.routeIdx < v.route.length - 1) return this.rerouteFromLane(v);
     const res = this.router.route(v.kind, [{ ds: dsOfLane(v.lane), s: v.s }], [v.dest], v.seed, v.vMax);
     if (!res) return false;
     v.route = res.legs;
@@ -340,6 +419,24 @@ export class TrafficSim {
         this.removeFrom(v.granted.granted, v);
         v.granted = null;
       }
+    }
+    return true;
+  }
+
+  /** Sends a vehicle standing on a lane to new destinations. Returns false if there is no route. */
+  redirect(v: Vehicle, dests: Destination[]): boolean {
+    if (!v.lane || dests.length === 0) return false;
+    const res = this.router.route(v.kind, [{ ds: dsOfLane(v.lane), s: v.s }], dests, v.seed, v.vMax);
+    if (!res) return false;
+    v.route = res.legs;
+    v.routeIdx = 0;
+    v.dest = res.dest;
+    v.nextConn = null;
+    v.needsReroute = false;
+    v.lastRoute = this.time;
+    if (v.granted) {
+      this.removeFrom(v.granted.granted, v);
+      v.granted = null;
     }
     return true;
   }
@@ -366,6 +463,8 @@ export class TrafficSim {
     const isFinal = legIdx >= v.route.length - 1;
     if (isFinal) {
       if (!v.dest || v.dest.outside) return lane.vehicles.length * 0.02;
+      // Buses must reach the curb lane to serve their stop.
+      if (v.onStop) return lane.index * 3 + (lane.busOnly ? -0.3 : 0);
       const near = v.dest.s - v.s < 150;
       return (near ? lane.index : lane.index * 0.05) + lane.vehicles.length * 0.02;
     }
@@ -426,8 +525,10 @@ export class TrafficSim {
         }
       }
       if (!v.nextConn || v.nextConn.from !== v.lane) v.nextConn = this.planConnector(v);
-      const c = v.nextConn;
       const dist = v.lane.length - v.s;
+      // Stuck at the front of a lane that does not lead where the route goes: take another turn.
+      if (!v.nextConn && v.blockedTime > 4 && dist < 12 && v.v < 0.5 && v.lane.vehicles[0] === v && v.routeIdx < v.route.length - 1) this.rerouteFromLane(v);
+      const c = v.nextConn;
       v.distToStop = dist;
       if (c && v.granted !== c && dist < 110) c.approaching.push(v);
     }
@@ -488,6 +589,7 @@ export class TrafficSim {
   }
 
   private accelOnLane(v: Vehicle, leader: Vehicle | null, dt: number): number {
+    if (v.dwell > 0) return -B_MAX;
     const lane = v.lane!;
     const v0 = this.desired(v, lane.speedLimit);
     let acc = leader ? idm(v, v0, leader.s - leader.length - v.s, v.v - leader.v) : idmFree(v, v0);
@@ -535,8 +637,13 @@ export class TrafficSim {
       if (dist < reqDist && ctrl.canEnter(v, c, dist)) {
         if (v.granted) this.removeFrom(v.granted.granted, v);
         v.granted = c;
+        v.grantTime = this.time;
         c.granted.push(v);
       }
+    } else if (v.granted === c && v.v < 0.3 && this.time - v.grantTime > 3) {
+      // Still standing at the line (the exit filled up): let other movements go meanwhile.
+      this.removeFrom(c.granted, v);
+      v.granted = null;
     }
     if (v.granted !== c) {
       acc = Math.min(acc, idm(v, v0, dist - 0.8, v.v));
@@ -612,7 +719,7 @@ export class TrafficSim {
       if (Math.min(left, right) < cur - 0.3) {
         target = left < right ? lane.left : lane.right;
         mandatory = dist < 120;
-      } else if (dist > 60 && v.v > 2) {
+      } else if (dist > 60 && (v.v > 2 || this.behindStoppedBus(v, lane))) {
         // Discretionary change (MOBIL) among equally good lanes.
         target = this.mobil(v, lane, left, right, cur);
       }
@@ -632,6 +739,13 @@ export class TrafficSim {
       v.mergeTarget = target;
       target.mergers.push(v);
     }
+  }
+
+  /** True if the vehicle ahead is a bus standing at a stop close in front. */
+  private behindStoppedBus(v: Vehicle, lane: Lane): boolean {
+    const idx = lane.vehicles.indexOf(v);
+    const leader = idx > 0 ? lane.vehicles[idx - 1] : null;
+    return !!leader && leader.dwell > 0 && leader.s - leader.length - v.s < 30;
   }
 
   private neighbours(lane: Lane, s: number, self: Vehicle): { lead: Vehicle | null; follow: Vehicle | null } {
@@ -720,6 +834,16 @@ export class TrafficSim {
 
   private move(v: Vehicle, dt: number): void {
     if (v.listIndex < 0) return;
+    if (v.dwell > 0) {
+      v.v = 0;
+      v.dwell -= dt;
+      if (v.dwell <= 0) {
+        v.dwell = 0;
+        v.waitTime = 0;
+      }
+      this.updatePose(v);
+      return;
+    }
     const acc = v.acc;
     const v1 = Math.max(0, v.v + acc * dt);
     const ds = acc < 0 && v1 === 0 ? (v.v * v.v) / (2 * Math.max(0.1, -acc)) : (v.v + v1) * 0.5 * dt;
@@ -745,7 +869,16 @@ export class TrafficSim {
 
     // Arrival on the destination lane.
     const isFinal = v.routeIdx >= v.route.length - 1;
-    if (v.lane && isFinal && v.dest && !v.dest.outside && v.s >= v.dest.s - 0.5) {
+    const dest = v.dest;
+    if (v.lane && isFinal && dest && !dest.outside && v.s >= dest.s - 0.5 && v.lane.segment === dest.seg && v.lane.forward === dest.forward) {
+      const dwell = v.onStop ? v.onStop(v) : null;
+      if (dwell !== null && v.listIndex >= 0) {
+        this.stats.arrived++;
+        v.dwell = Math.max(0.1, dwell);
+        v.v = 0;
+        this.updatePose(v);
+        return;
+      }
       this.finish(v, true, 'arrived');
       return;
     }
@@ -840,33 +973,46 @@ export class TrafficSim {
     }
   }
 
+  /** Vehicles slowing down to park or standing at a bus stop (not delayed by traffic). */
+  private arriving(v: Vehicle): boolean {
+    if (v.dwell > 0) return true;
+    const d = v.dest;
+    return !!d && !d.outside && v.routeIdx >= v.route.length - 1 && d.s - v.s < 60;
+  }
+
+  /**
+   * Speed the vehicle would drive on an empty road: the limit, or less where it must slow down
+   * for its next turn or stop line anyway.
+   */
+  private freeSpeed(v: Vehicle, lane: Lane): number {
+    const v0 = this.desired(v, lane.speedLimit);
+    const c = v.nextConn;
+    if (!c) return v0;
+    const vt = v.granted === c ? c.maxSpeed * v.speedFactor : 0;
+    const dist = Math.max(0, lane.length - v.s - 1);
+    return Math.max(1, Math.min(v0, Math.sqrt(vt * vt + 2 * v.bComf * dist)));
+  }
+
   private updateStats(dt: number): void {
     const k = Math.min(1, dt * 0.15);
-    let sumRatio = 0;
-    let n = 0;
+    // Lane congestion (for routing and the traffic view): speed relative to the free-road speed.
     for (const lane of this.net.lanes) {
       const list = lane.vehicles;
-      if (list.length === 0) {
+      let r = 0;
+      let m = 0;
+      for (const v of list) {
+        if (this.arriving(v)) continue;
+        r += Math.min(1, v.v / this.freeSpeed(v, lane));
+        m++;
+      }
+      if (m === 0) {
         lane.statSpeed += (1 - lane.statSpeed) * k * 0.5;
         lane.statWait *= 1 - k * 0.3;
         continue;
       }
-      let r = 0;
-      for (const v of list) r += Math.min(1, v.v / Math.max(1, Math.min(lane.speedLimit, v.vMax) * v.speedFactor));
-      r /= list.length;
-      lane.statSpeed += (r - lane.statSpeed) * k;
+      lane.statSpeed += (r / m - lane.statSpeed) * k;
       lane.statFlow = list.length;
-      sumRatio += r * list.length;
-      n += list.length;
     }
-    for (const c of this.net.connectors) {
-      for (const v of c.vehicles) {
-        sumRatio += Math.min(1, v.v / Math.max(1, Math.min(c.maxSpeed, v.vMax) * v.speedFactor));
-        n++;
-      }
-    }
-    const flow = n > 0 ? sumRatio / n : 1;
-    this.stats.flow += (flow - this.stats.flow) * 0.2;
   }
 
   /** Vehicle closest to a world point (within `radius` meters). */

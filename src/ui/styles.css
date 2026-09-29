@@ -1174,3 +1174,56 @@ table.budget tr.net td {
   margin-top: 8px;
   font-size: 12.5px;
 }
+
+/* ---------- Transit ---------- */
+.color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.color-chip {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.color-chip.on {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--panel-solid) inset;
+}
+
+.bus-count {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.bus-count .count {
+  min-width: 90px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.line-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.line-chip {
+  border: none;
+  border-radius: 7px;
+  padding: 4px 10px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+}
