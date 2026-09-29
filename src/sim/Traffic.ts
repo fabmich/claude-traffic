@@ -5,7 +5,7 @@ import { isLeftTurn, isRightTurn, type Connector, type Lane, type Network, type 
 import type { JunctionSettings } from '../roads/settings';
 import { JunctionControl } from './junctions';
 import { B_MAX, CAR_COLORS, KIND_PARAMS, TRUCK_COLORS, VKind, type VKindId } from './params';
-import { dsOf, dsOfLane, Router } from './routing';
+import { dsOf, dsOfLane, Router, type RouteResult } from './routing';
 import { Vehicle, type Destination, type Leg, type StopHandler, type TripHandler } from './vehicle';
 
 export interface TrafficSettings {
@@ -34,6 +34,8 @@ export interface SpawnRequest {
   /** Called if the vehicle could not be spawned (no route or no gap for too long). */
   onFail?: (reason: 'noroute' | 'timeout' | 'cap') => void;
   created?: number;
+  /** Route found on an earlier attempt (reused while waiting for a gap). */
+  cached?: { res: RouteResult; time: number };
 }
 
 export interface TrafficStats {
@@ -184,8 +186,26 @@ export class TrafficSim {
     }
     for (const l of net.lanes) l.vehicles.sort((a, b) => b.s - a.s);
     for (const c of net.connectors) c.vehicles.sort((a, b) => b.s - a.s);
-    this.pending = this.pending.filter((r) => r.origins.every((o) => net.laneByKey.get(o.lane.key)));
-    for (const r of this.pending) r.origins = r.origins.map((o) => ({ lane: net.laneByKey.get(o.lane.key)!, s: o.s }));
+    // Queued trips follow the new network; trips whose start or end vanished are given up.
+    const keep: SpawnRequest[] = [];
+    for (const r of this.pending) {
+      const origins = r.origins.map((o) => ({ lane: net.laneByKey.get(o.lane.key), s: o.s })).filter((o): o is SpawnOrigin => !!o.lane);
+      const dests: Destination[] = [];
+      for (const d of r.dests) {
+        const seg = net.segByKey.get(d.seg.key);
+        const lanes = seg ? (d.forward ? seg.forward : seg.backward) : [];
+        if (seg && lanes.length) dests.push({ ...d, seg, s: Math.min(d.s, lanes[0].length - 0.5) });
+      }
+      if (origins.length === 0 || dests.length === 0) {
+        r.onFail?.('timeout');
+        continue;
+      }
+      r.origins = origins;
+      r.dests = dests;
+      r.cached = undefined;
+      keep.push(r);
+    }
+    this.pending = keep;
   }
 
   private legMatchesLane(v: Vehicle): boolean {
@@ -211,18 +231,35 @@ export class TrafficSim {
     const length = p.length[0] + this.rng.next() * (p.length[1] - p.length[0]);
     const origins = req.origins.filter((o) => o.lane.length > 0);
     if (origins.length === 0) return 'fail';
+    // Cheap check first: is there room anywhere at the origins?
+    let anyRoom = false;
+    for (const o of origins) {
+      for (const lane of o.lane.siblings) {
+        if (lane.busOnly && kind !== VKind.Bus) continue;
+        if (this.roomAt(lane, Math.min(Math.max(o.s, length + 0.2), lane.length - 0.5), length) > 0) {
+          anyRoom = true;
+          break;
+        }
+      }
+      if (anyRoom) break;
+    }
+    if (!anyRoom) return 'wait';
     const seed = this.rng.int(1 << 30);
-    const res = this.router.route(
-      kind,
-      origins.map((o) => ({ ds: dsOfLane(o.lane), s: o.s })),
-      req.dests,
-      seed,
-      p.vMax,
-    );
+    let res = req.cached && this.time - req.cached.time < 20 ? req.cached.res : null;
     if (!res) {
-      this.stats.noRoute++;
-      req.onFail?.('noroute');
-      return 'fail';
+      res = this.router.route(
+        kind,
+        origins.map((o) => ({ ds: dsOfLane(o.lane), s: o.s })),
+        req.dests,
+        seed,
+        p.vMax,
+      );
+      if (!res) {
+        this.stats.noRoute++;
+        req.onFail?.('noroute');
+        return 'fail';
+      }
+      req.cached = { res, time: this.time };
     }
     const firstDs = dsOf(res.legs[0].seg, res.legs[0].forward);
     const origin = origins.find((o) => dsOfLane(o.lane) === firstDs) ?? origins[0];
@@ -385,7 +422,10 @@ export class TrafficSim {
       const cost = res.cost + c.length / Math.max(2, c.maxSpeed);
       if (!best || cost < best.cost) best = { c, legs: res.legs, dest: res.dest, cost };
     }
-    if (!best) return false;
+    if (!best) {
+      v.lastRoute = this.time;
+      return false;
+    }
     v.route = [{ seg: lane.segment, forward: lane.forward }, ...best.legs];
     v.routeIdx = 0;
     v.dest = best.dest;
@@ -527,7 +567,7 @@ export class TrafficSim {
       if (!v.nextConn || v.nextConn.from !== v.lane) v.nextConn = this.planConnector(v);
       const dist = v.lane.length - v.s;
       // Stuck at the front of a lane that does not lead where the route goes: take another turn.
-      if (!v.nextConn && v.blockedTime > 4 && dist < 12 && v.v < 0.5 && v.lane.vehicles[0] === v && v.routeIdx < v.route.length - 1) this.rerouteFromLane(v);
+      if (!v.nextConn && v.blockedTime > 4 && dist < 12 && v.v < 0.5 && v.lane.vehicles[0] === v && v.routeIdx < v.route.length - 1 && this.time - v.lastRoute > 3) this.rerouteFromLane(v);
       const c = v.nextConn;
       v.distToStop = dist;
       if (c && v.granted !== c && dist < 110) c.approaching.push(v);
@@ -549,24 +589,16 @@ export class TrafficSim {
     // Movement.
     const moving = this.vehicles.slice();
     for (const v of moving) this.move(v, dt);
-    // Spawns.
+    // Spawns: a limited number of attempts per step; waiting requests go to the back of the queue.
     if (this.pending.length) {
-      const keep: SpawnRequest[] = [];
-      const budget = 40;
-      let n = 0;
-      for (const r of this.pending) {
-        if (n >= budget) {
-          keep.push(r);
-          continue;
-        }
-        n++;
+      const attempts = this.pending.splice(0, 30);
+      for (const r of attempts) {
         const res = this.trySpawn(r);
         if (res === 'wait') {
           if (this.time - (r.created ?? 0) > 60) r.onFail?.('timeout');
-          else keep.push(r);
+          else this.pending.push(r);
         }
       }
-      this.pending = keep;
     }
     this.statTimer += dt;
     if (this.statTimer >= 1) {

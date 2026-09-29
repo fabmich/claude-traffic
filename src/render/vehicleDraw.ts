@@ -20,6 +20,26 @@ export function drawVehicles(ctx: CanvasRenderingContext2D, r: Renderer, traffic
   const view = cam.visibleRect(20);
   const alpha = r.alpha;
   const dots = cam.zoom < 0.55;
+  // Below ~3 device pixels per meter details are invisible: plain rectangles are much cheaper.
+  const simple = S < 3.2;
+  if (dots) {
+    // Far away: one square per vehicle, no rotation.
+    ctx.setTransform(S, 0, 0, S, ox, oy);
+    const d0 = Math.max(2.6, 3.2 / cam.zoom);
+    for (const v of traffic.vehicles) {
+      if (layer === 'upper' ? v.layer !== 1 : v.layer === 1) continue;
+      const x = v.px + (v.x - v.px) * alpha;
+      const y = v.py + (v.y - v.py) * alpha;
+      if (x < view.x0 || x > view.x1 || y < view.y0 || y > view.y1) continue;
+      ctx.globalAlpha = v.layer === -1 ? 0.28 : 1;
+      ctx.fillStyle = v.color;
+      const d = v.kind === VKind.Bus ? d0 * 1.6 : d0;
+      ctx.fillRect(x - d / 2, y - d / 2, d, d);
+    }
+    ctx.globalAlpha = 1;
+    r.applyWorldTransform();
+    return;
+  }
   for (const v of traffic.vehicles) {
     if (layer === 'upper' ? v.layer !== 1 : v.layer === 1) continue;
     const x = v.px + (v.x - v.px) * alpha;
@@ -29,16 +49,14 @@ export function drawVehicles(ctx: CanvasRenderingContext2D, r: Renderer, traffic
     const c = Math.cos(h);
     const s = Math.sin(h);
     ctx.globalAlpha = v.layer === -1 ? 0.28 : 1;
-    if (dots) {
-      ctx.setTransform(S, 0, 0, S, ox, oy);
-      ctx.fillStyle = v.color;
-      const d = Math.max(2.6, 3.2 / cam.zoom) * (v.kind === VKind.Bus ? 1.6 : 1);
-      ctx.fillRect(x - d / 2, y - d / 2, d, d);
-      continue;
-    }
     ctx.setTransform(S * c, S * s, -S * s, S * c, S * x + ox, S * y + oy);
     const L = v.length;
     const W = v.width;
+    if (simple && v !== selected) {
+      ctx.fillStyle = v.color;
+      ctx.fillRect(-L / 2, -W / 2, L, W);
+      continue;
+    }
     // Shadow.
     ctx.fillStyle = 'rgba(10, 20, 30, 0.22)';
     ctx.beginPath();
