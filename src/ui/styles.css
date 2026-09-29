@@ -708,6 +708,14 @@ kbd {
   }
   .tool-btn {
     min-width: 54px;
+    padding: 6px 5px 5px;
+  }
+  .toolbar,
+  .subtoolbar {
+    gap: 4px;
+  }
+  .tool-label {
+    font-size: 10px;
   }
 }
 

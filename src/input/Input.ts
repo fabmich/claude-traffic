@@ -13,13 +13,20 @@ const PAN_KEYS: Record<string, [number, number]> = {
   ArrowRight: [1, 0],
 };
 
-/** Mouse / keyboard handling: camera controls plus forwarding to the active tool. */
+/**
+ * Mouse, touch and keyboard handling: camera controls plus forwarding to the active tool.
+ * On touch screens one finger pans (or uses the selected tool) and two fingers pinch to zoom.
+ */
 export class Input {
   /** Last known pointer position over the map, or null if outside. */
   pointer: PointerInfo | null = null;
   private panning: { sx: number; sy: number; moved: number } | null = null;
   private held = new Set<string>();
   private leftDown = false;
+  private touches = new Map<number, { x: number; y: number }>();
+  private pinch: { dist: number; cx: number; cy: number } | null = null;
+  /** One-finger drag without a tool: pans, or inspects on a tap. */
+  private touchPan: { sx: number; sy: number; moved: number } | null = null;
 
   constructor(
     private game: Game,
@@ -28,6 +35,11 @@ export class Input {
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
     window.addEventListener('pointerup', this.onUp);
+    window.addEventListener('pointercancel', (e) => {
+      this.touches.delete(e.pointerId);
+      if (this.touches.size < 2) this.pinch = null;
+      this.touchPan = null;
+    });
     canvas.addEventListener('pointerleave', () => {
       if (!this.panning && !this.leftDown) this.pointer = null;
     });
@@ -57,10 +69,33 @@ export class Input {
     };
   }
 
+  private pinchState(): { dist: number; cx: number; cy: number } {
+    const [a, b] = [...this.touches.values()];
+    const rect = this.canvas.getBoundingClientRect();
+    return { dist: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), cx: (a.x + b.x) / 2 - rect.left, cy: (a.y + b.y) / 2 - rect.top };
+  }
+
   private onDown = (e: PointerEvent): void => {
     this.canvas.setPointerCapture?.(e.pointerId);
     const p = this.info(e);
     this.pointer = p;
+    if (e.pointerType === 'touch') {
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.touches.size >= 2) {
+        // A second finger turns any gesture into pinch zoom.
+        if (this.leftDown) {
+          this.leftDown = false;
+          this.game.activeTool.cancel?.();
+        }
+        this.touchPan = null;
+        this.pinch = this.touches.size === 2 ? this.pinchState() : null;
+        return;
+      }
+      if (!this.game.tool) {
+        this.touchPan = { sx: p.sx, sy: p.sy, moved: 0 };
+        return;
+      }
+    }
     if (e.button === 1 || e.button === 2) {
       this.panning = { sx: p.sx, sy: p.sy, moved: 0 };
       return;
@@ -74,6 +109,26 @@ export class Input {
   private onMove = (e: PointerEvent): void => {
     const p = this.info(e);
     this.pointer = p;
+    if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) {
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const cam = this.game.renderer.camera;
+      if (this.pinch && this.touches.size === 2) {
+        const next = this.pinchState();
+        cam.pan(next.cx - this.pinch.cx, next.cy - this.pinch.cy);
+        cam.zoomAt(next.cx, next.cy, next.dist / this.pinch.dist);
+        this.pinch = next;
+        return;
+      }
+      if (this.touchPan) {
+        const dx = p.sx - this.touchPan.sx;
+        const dy = p.sy - this.touchPan.sy;
+        this.touchPan.moved += Math.abs(dx) + Math.abs(dy);
+        if (this.touchPan.moved > 8) cam.pan(dx, dy);
+        this.touchPan.sx = p.sx;
+        this.touchPan.sy = p.sy;
+        return;
+      }
+    }
     if (this.panning) {
       const dx = p.sx - this.panning.sx;
       const dy = p.sy - this.panning.sy;
@@ -89,6 +144,22 @@ export class Input {
 
   private onUp = (e: PointerEvent): void => {
     const p = this.info(e);
+    if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) {
+      this.touches.delete(e.pointerId);
+      if (this.pinch) {
+        if (this.touches.size < 2) this.pinch = null;
+        return;
+      }
+      if (this.touchPan) {
+        // A tap without dragging inspects what is under the finger.
+        if (this.touchPan.moved <= 8) {
+          this.game.activeTool.pointerDown?.(p);
+          this.game.activeTool.pointerUp?.(p);
+        }
+        this.touchPan = null;
+        return;
+      }
+    }
     if (this.panning && (e.button === 1 || e.button === 2)) {
       const wasClick = this.panning.moved < 5;
       this.panning = null;
