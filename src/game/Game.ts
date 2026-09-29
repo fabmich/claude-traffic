@@ -2,7 +2,9 @@ import { MAX_STEPS_PER_FRAME, SIM_DT, SPEED_LEVELS, TILE, TIME_SCALE } from '../
 import { Emitter } from '../core/events';
 import { Input } from '../input/Input';
 import type { PointerInfo, Tool } from '../input/tool';
+import { drawOutsideMarkers } from '../render/markers';
 import { Renderer } from '../render/Renderer';
+import { setupToolbar } from '../ui/toolbarSetup';
 import { UI } from '../ui/UI';
 import { World, type NewGameOptions } from './World';
 
@@ -38,8 +40,14 @@ export class Game {
     this.input = new Input(this, this.canvas);
     window.addEventListener('resize', () => this.renderer.resize());
     this.renderer.resize();
+    this.renderer.upperDrawers.push((ctx, r) => {
+      if (this.world) drawOutsideMarkers(ctx, r, this.world);
+    });
     this.renderer.overlayDrawers.push((ctx, r) => this.tool?.drawOverlay?.(ctx, r));
+    this.tools = setupToolbar(this);
   }
+
+  readonly tools: ReturnType<typeof setupToolbar>;
 
   newGame(options: NewGameOptions): void {
     this.setTool(null);

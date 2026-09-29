@@ -715,3 +715,9 @@ kbd {
 .subtoolbar:empty {
   display: none;
 }
+
+.swatch {
+  display: inline-flex;
+  width: 28px;
+  height: 24px;
+}
