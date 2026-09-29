@@ -107,3 +107,31 @@ test('building a crossroads with the mouse creates a junction and costs money', 
   expect(after).toBeGreaterThan(info.money);
   expect(errors).toEqual([]);
 });
+
+test('junction editor: traffic lights and lane manager work from the UI', async ({ page }) => {
+  const errors: string[] = [];
+  await startGame(page, errors, { seed: 4242, sandbox: true });
+  const [x, y] = await prepareFlatArea(page, 14);
+  await page.keyboard.press('r');
+  await page.locator('.subtoolbar .tool-btn', { hasText: 'Avenue' }).click();
+  await dragTiles(page, [x + 1, y + 7], [x + 13, y + 7]);
+  await dragTiles(page, [x + 7, y + 1], [x + 7, y + 13]);
+  await page.keyboard.press('Escape');
+  const [jx, jy] = await screenOf(page, x + 7, y + 7);
+  await page.mouse.click(jx, jy);
+  await expect(page.locator('.side-panel h3')).toContainText('Junction');
+  await page.locator('.side-panel .seg', { hasText: 'Lights' }).click();
+  const kind = await page.evaluate(([cx, cy]) => {
+    const w = (window as unknown as G).__game.world;
+    const node = w.network.nodeByTile.get(cy * w.map.w + cx);
+    return w.traffic.control(node).kind as string;
+  }, [x + 7, y + 7]);
+  expect(kind).toBe('signals');
+  await expect(page.locator('.phase')).toHaveCount(2);
+  // Turn off the first arrow of the first lane in the lane manager.
+  const outsBefore = await page.evaluate(() => (window as unknown as G).__game.world.network.connectors.length as number);
+  await page.locator('.lane-manager .chip.on').first().click();
+  const outsAfter = await page.evaluate(() => (window as unknown as G).__game.world.network.connectors.length as number);
+  expect(outsAfter).toBeLessThan(outsBefore);
+  expect(errors).toEqual([]);
+});

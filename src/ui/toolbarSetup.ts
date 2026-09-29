@@ -160,6 +160,24 @@ export function setupToolbar(game: Game): Toolset {
         },
       }),
     );
+    for (const [kind, label, title] of [
+      ['delays', 'Junction delays', 'Average waiting time at each junction'],
+      ['speed', 'Speed limits', 'Show the speed limit of every road'],
+    ] as Array<['delays' | 'speed', string, string]>) {
+      host.append(
+        subButton({
+          label,
+          icon: kind === 'delays' ? ICONS.clock : ICONS.speed,
+          sub: game.overlay === kind ? 'on' : 'off',
+          title,
+          active: game.overlay === kind,
+          onClick: () => {
+            game.setOverlay(game.overlay === kind ? 'none' : kind);
+            refreshSub();
+          },
+        }),
+      );
+    }
     if (world) {
       const gen = world.generator;
       host.append(

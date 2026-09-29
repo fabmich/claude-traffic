@@ -9,7 +9,7 @@ import { Connector, Lane, Network, RoadNode, Segment, type Arm } from './network
 import { ATTR_BUS_LANE, ATTR_TRUCK_BAN, type Link, type RoadLayer, type Span } from './roadLayer';
 import { ROAD_TYPES, roadWidth, type RoadType } from './roadTypes';
 import { buildRingSegments, planRoundabouts, ringLanePairs, ringNodePolygon } from './roundabout';
-import type { JunctionSettings } from './settings';
+import { armsSignature, type JunctionSettings } from './settings';
 
 export interface CompileInput {
   layer: RoadLayer;
@@ -57,8 +57,8 @@ function nodeSignature(node: RoadNode, settings: JunctionSettings): string {
     for (const l of a.ins) s += `i${l.path.x1.toFixed(2)},${l.path.y1.toFixed(2)},${l.path.endHeading().toFixed(3)},${l.speedLimit.toFixed(2)};`;
     for (const l of a.outs) s += `o${l.path.x0.toFixed(2)},${l.path.y0.toFixed(2)},${l.path.startHeading().toFixed(3)},${l.speedLimit.toFixed(2)};`;
   }
-  const custom = settings.get(node.tile)?.lanes;
-  if (custom) s += JSON.stringify(custom);
+  const js = settings.get(node.tile);
+  if (js?.lanes) s += JSON.stringify(js.lanes) + (js.lanesSig ?? '');
   return s;
 }
 
@@ -553,7 +553,9 @@ function restoreConnectors(net: Network, node: RoadNode, e: NodeCacheEntry): voi
 
 /** Creates the connectors of a node from default arrows and user lane overrides. */
 export function buildConnectors(net: Network, node: RoadNode, settings: JunctionSettings): void {
-  const custom = settings.get(node.tile)?.lanes;
+  const js = settings.get(node.tile);
+  // Lane overrides only apply while the junction keeps the layout they were made for.
+  const custom = js?.lanes && (!js.lanesSig || js.lanesSig === armsSignature(node.arms)) ? js.lanes : undefined;
   let pairs: LanePair[] = defaultConnections(node);
   if (custom) {
     const overridden = new Set<Lane>();

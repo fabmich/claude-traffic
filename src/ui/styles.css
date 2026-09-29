@@ -726,3 +726,176 @@ kbd {
   display: flex;
   align-items: center;
 }
+
+/* ---------- Junction editor & lane manager ---------- */
+.segmented.wrap {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.seg.locked,
+.btn.locked {
+  opacity: 0.5;
+}
+
+.row.wrap {
+  flex-wrap: wrap;
+}
+
+.row {
+  margin-top: 8px;
+}
+
+.arm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.arm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.arm-name {
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.arm-name.small {
+  width: 64px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.phase-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.phase {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.phase.current {
+  border-color: var(--good);
+  box-shadow: 0 0 0 1px var(--good) inset;
+}
+
+.phase-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.phase-head b {
+  flex: 1;
+}
+
+.phase-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.phase-arm {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  color: var(--faint);
+  cursor: pointer;
+  padding: 0;
+}
+
+.chip:hover {
+  color: var(--text);
+}
+
+.chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.chip svg {
+  transition: transform 0.1s;
+}
+
+.input.num {
+  width: 64px;
+  padding: 4px 6px;
+}
+
+label.inline {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.lane-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lm-arm-name {
+  font-weight: 700;
+  font-size: 12px;
+  margin-bottom: 4px;
+  text-transform: capitalize;
+}
+
+.lm-lane {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.lm-lane-name {
+  width: 86px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.lm-arrows {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.lm-stat {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.warn-line {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--warn);
+}

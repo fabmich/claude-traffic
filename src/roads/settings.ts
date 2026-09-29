@@ -25,7 +25,17 @@ export interface JunctionSetting {
    * Lanes without an entry use the default arrows.
    */
   lanes?: Record<string, Array<[number, number]>>;
+  /** Arm layout the lane overrides were made for; overrides are ignored if the junction changes. */
+  lanesSig?: string;
   roundaboutLarge?: boolean;
+}
+
+/** Signature of a junction's arm layout (direction and lane counts). */
+export function armsSignature(arms: ReadonlyArray<{ dir: number; nIn: number; nOut: number }>): string {
+  return arms
+    .filter((a) => a.dir < 8)
+    .map((a) => `${a.dir}:${a.nIn}:${a.nOut}`)
+    .join(',');
 }
 
 export class JunctionSettings {

@@ -28,4 +28,19 @@ export type MapSizeKey = keyof typeof MAP_SIZES;
 
 export const START_MONEY = 70_000;
 
+/** Junction upgrade prices. */
+export const SIGNAL_COST = 500;
+export const ROUNDABOUT_COST = 1_200;
+export const ROUNDABOUT_LARGE_COST = 3_000;
+
+/** Population needed before these tools unlock (normal mode). */
+export const UNLOCK = {
+  signals: 300,
+  roundabout: 300,
+  roundaboutLarge: 2_500,
+  buses: 1_000,
+  truckBan: 1_000,
+  busLane: 1_000,
+} as const;
+
 export const KMH = 1 / 3.6;

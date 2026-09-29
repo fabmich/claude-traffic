@@ -1,12 +1,12 @@
-import { START_MONEY, TILE } from '../config';
+import { ROUNDABOUT_COST, ROUNDABOUT_LARGE_COST, SIGNAL_COST, START_MONEY, TILE } from '../config';
 import { Emitter } from '../core/events';
 import { Rng } from '../core/rng';
 import { CompileCache, compileNetwork } from '../roads/compile';
-import type { Network } from '../roads/network';
+import type { ControlKind, Network, RoadNode } from '../roads/network';
 import { planBulldoze, planRoad, type BulldozePlan, type PlanContext, type RoadPlan } from '../roads/placement';
-import { RoadLayer } from '../roads/roadLayer';
+import { ATTR_BUS_LANE, ATTR_TRUCK_BAN, EDGE_ONEWAY_REV, RoadLayer } from '../roads/roadLayer';
 import { ROAD } from '../roads/roadTypes';
-import { JunctionSettings, type JunctionSetting } from '../roads/settings';
+import { armsSignature, JunctionSettings, type JunctionSetting, type SignalPlanSetting, type SignKind } from '../roads/settings';
 import { TrafficGenerator } from '../sim/generator';
 import { TrafficSim } from '../sim/Traffic';
 import { DX, DY } from '../world/grid';
@@ -131,6 +131,149 @@ export class World {
   /** Changes the settings of a junction (signs, lights, lanes...) and recompiles. */
   updateJunction(tile: number, fn: (s: JunctionSetting) => void): void {
     fn(this.junctions.ensure(tile));
+    this.cleanupSetting(tile);
+    this.rebuildNetwork();
+  }
+
+  /** Nodes that make up the junction at a tile (one, or the ring nodes of a roundabout). */
+  junctionNodes(tile: number): RoadNode[] {
+    const rb = this.network.roundabouts.get(tile);
+    if (rb) return rb.nodes;
+    const n = this.network.nodeByTile.get(tile);
+    return n ? [n] : [];
+  }
+
+  /** Number of roads meeting at a junction (ring nodes each carry one road). */
+  junctionArmCount(tile: number): number {
+    const nodes = this.junctionNodes(tile);
+    if (nodes.length === 0) return 0;
+    if (nodes[0].ringOf !== null) return nodes.length;
+    return nodes[0].arms.length;
+  }
+
+  controlCost(control: ControlKind, large = false): number {
+    if (control === 'signals') return SIGNAL_COST;
+    if (control === 'roundabout') return large ? ROUNDABOUT_LARGE_COST : ROUNDABOUT_COST;
+    return 0;
+  }
+
+  /** Switches a junction's traffic control. Returns an error message or null. */
+  setJunctionControl(tile: number, control: ControlKind, large = false): string | null {
+    const nodes = this.junctionNodes(tile);
+    if (nodes.length === 0) return 'Click on a junction';
+    if (nodes[0].outside) return 'Highway exits cannot be changed';
+    const arms = this.junctionArmCount(tile);
+    if ((control === 'signals' || control === 'allstop' || control === 'priority') && arms < 3) return 'This needs a junction of at least 3 roads';
+    if (control === 'roundabout') {
+      if (arms > 8) return 'Too many roads for a roundabout';
+      const r = (large || arms > 4 ? 20 : 8.8) + 10;
+      const cx = nodes[0].ringOf !== null ? this.network.roundabouts.get(tile)!.x : nodes[0].x;
+      const cy = nodes[0].ringOf !== null ? this.network.roundabouts.get(tile)!.y : nodes[0].y;
+      for (const n of this.network.nodes) {
+        if (n.tile === tile || n.ringOf === tile) continue;
+        if (Math.hypot(n.x - cx, n.y - cy) < r) return 'Too close to another junction';
+      }
+    }
+    const cur = this.junctions.get(tile);
+    const curKind = cur?.control ?? 'auto';
+    if (curKind === control && (control !== 'roundabout' || !!cur?.roundaboutLarge === large)) return null;
+    const cost = this.controlCost(control, large);
+    if (!this.canAfford(cost)) return 'Not enough money';
+    this.spend(cost);
+    const s = this.junctions.ensure(tile);
+    if (control === 'auto') delete s.control;
+    else s.control = control;
+    if (control === 'roundabout') {
+      s.roundaboutLarge = large;
+      delete s.lanes;
+      delete s.lanesSig;
+      delete s.signs;
+    } else delete s.roundaboutLarge;
+    if (control !== 'signals') delete s.signalPlan;
+    if (control !== 'priority') delete s.signs;
+    this.cleanupSetting(tile);
+    this.rebuildNetwork();
+    return null;
+  }
+
+  setSign(tile: number, armDir: number, kind: SignKind): void {
+    const s = this.junctions.ensure(tile);
+    s.control = 'priority';
+    s.signs = { ...(s.signs ?? {}), [armDir]: kind };
+    this.rebuildNetwork();
+  }
+
+  setSignalPlan(tile: number, plan: SignalPlanSetting): void {
+    const s = this.junctions.ensure(tile);
+    s.control = 'signals';
+    s.signalPlan = plan;
+    this.rebuildNetwork();
+  }
+
+  /** Sets (or clears with null) the custom targets of one incoming lane. */
+  setLaneTargets(tile: number, inDir: number, laneIdx: number, targets: Array<[number, number]> | null): void {
+    const node = this.network.nodeByTile.get(tile);
+    if (!node) return;
+    const s = this.junctions.ensure(tile);
+    const sig = armsSignature(node.arms);
+    const lanes = s.lanesSig === sig ? { ...(s.lanes ?? {}) } : {};
+    const key = `${inDir}:${laneIdx}`;
+    if (targets) lanes[key] = targets;
+    else delete lanes[key];
+    if (Object.keys(lanes).length) {
+      s.lanes = lanes;
+      s.lanesSig = sig;
+    } else {
+      delete s.lanes;
+      delete s.lanesSig;
+    }
+    this.cleanupSetting(tile);
+    this.rebuildNetwork();
+  }
+
+  resetJunctionLanes(tile: number): void {
+    const s = this.junctions.get(tile);
+    if (!s) return;
+    delete s.lanes;
+    delete s.lanesSig;
+    this.cleanupSetting(tile);
+    this.rebuildNetwork();
+  }
+
+  private cleanupSetting(tile: number): void {
+    const s = this.junctions.get(tile);
+    if (s && Object.values(s).every((v) => v === undefined)) this.junctions.delete(tile);
+  }
+
+  /** Changes speed limit, truck ban or bus lanes on every tile of a road segment. */
+  setSegmentAttrs(key: string, attrs: { speedKmh?: number; truckBan?: boolean; busLane?: boolean }): void {
+    const seg = this.network.segByKey.get(key);
+    if (!seg) return;
+    const edit = (speed: number, attr: number): [number, number] => {
+      if (attrs.speedKmh !== undefined) speed = attrs.speedKmh;
+      if (attrs.truckBan !== undefined) attr = attrs.truckBan ? attr | ATTR_TRUCK_BAN : attr & ~ATTR_TRUCK_BAN;
+      if (attrs.busLane !== undefined) attr = attrs.busLane ? attr | ATTR_BUS_LANE : attr & ~ATTR_BUS_LANE;
+      return [speed, attr];
+    };
+    for (const e of seg.edges) [this.roads.speed[e], this.roads.attr[e]] = edit(this.roads.speed[e], this.roads.attr[e]);
+    for (const id of seg.spanIds) {
+      const sp = this.roads.spans.get(id);
+      if (sp) [sp.speed, sp.attr] = edit(sp.speed, sp.attr);
+    }
+    this.roads.version++;
+    this.rebuildNetwork();
+  }
+
+  /** Flips the driving direction of a one-way road segment. */
+  reverseOneWay(key: string): void {
+    const seg = this.network.segByKey.get(key);
+    if (!seg || seg.type.lanesB !== 0) return;
+    for (const e of seg.edges) this.roads.flags[e] ^= EDGE_ONEWAY_REV;
+    for (const id of seg.spanIds) {
+      const sp = this.roads.spans.get(id);
+      if (sp) sp.flags ^= EDGE_ONEWAY_REV;
+    }
+    this.roads.version++;
     this.rebuildNetwork();
   }
 
