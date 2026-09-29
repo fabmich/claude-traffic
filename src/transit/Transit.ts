@@ -163,6 +163,15 @@ interface BusState {
 
 export type TransitEvents = { changed: void };
 
+export interface TransitSave {
+  stops: Array<{ id: number; name: string; ax: number; ay: number; heading: number; tile: number; boardings: number; prev: number }>;
+  lines: Array<{ id: number; name: string; color: string; stops: number[]; target: number; riders: number; prev: number }>;
+  nextStopId: number;
+  nextLineId: number;
+  tripsToday: number;
+  lastDay: number;
+}
+
 /** Bus stops, lines, buses and passengers, plus the mode choice hook of the city. */
 export class Transit {
   readonly events = new Emitter<TransitEvents>();
@@ -655,6 +664,47 @@ export class Transit {
     }
     if (best === Infinity) return 0;
     return (best < 200 ? 4 : best < 400 ? 2 : 1) + Math.min(2, lines.size - 1);
+  }
+
+  // ---------------------------------------------------------------- save games
+
+  save(): TransitSave {
+    return {
+      stops: this.stops.map((s) => ({ id: s.id, name: s.name, ax: s.ax, ay: s.ay, heading: s.heading, tile: s.tile, boardings: s.boardings, prev: s.boardingsYesterday })),
+      lines: this.lines.map((l) => ({ id: l.id, name: l.name, color: l.color, stops: l.stops.map((s) => s.id), target: l.target, riders: l.riders, prev: l.ridersYesterday })),
+      nextStopId: this.nextStopId,
+      nextLineId: this.nextLineId,
+      tripsToday: this.tripsToday,
+      lastDay: this.lastDay,
+    };
+  }
+
+  /** Restores stops and lines; buses start again from their stops. */
+  load(d: TransitSave): void {
+    this.stops = [];
+    this.lines = [];
+    const byId = new Map<number, Stop>();
+    for (const s of d.stops) {
+      const stop = new Stop(s.id, s.name, s.ax, s.ay, s.heading, s.tile);
+      stop.boardings = s.boardings;
+      stop.boardingsYesterday = s.prev;
+      this.resolve(stop);
+      this.stops.push(stop);
+      byId.set(s.id, stop);
+    }
+    for (const l of d.lines) {
+      const line = new Line(l.id, l.name, l.color);
+      line.target = l.target;
+      line.riders = l.riders;
+      line.ridersYesterday = l.prev;
+      this.lines.push(line);
+      this.setLineStops(line, l.stops.map((id) => byId.get(id)).filter((s): s is Stop => !!s));
+    }
+    this.nextStopId = d.nextStopId;
+    this.nextLineId = d.nextLineId;
+    this.tripsToday = d.tripsToday;
+    this.lastDay = d.lastDay;
+    this.changed();
   }
 
   // ---------------------------------------------------------------- network and step

@@ -269,3 +269,39 @@ test('bus line drawn with the transit tools runs buses', async ({ page }) => {
   expect(buses).toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });
+
+test('a saved city can be continued after reloading the page', async ({ page }) => {
+  const errors: string[] = [];
+  await startGame(page, errors, { seed: 8 });
+  const before = await page.evaluate(() => {
+    const g = (window as unknown as G).__game;
+    const w = g.world;
+    const m = w.map;
+    const DX = [1, 1, 0, -1, -1, -1, 0, 1];
+    const DY = [0, 1, 1, 1, 0, -1, -1, -1];
+    const oc = m.outside[0];
+    const path: number[] = [];
+    for (let k = 0; k <= 10; k++) path.push((oc.y + DY[oc.dir] * (oc.length + k)) * m.w + oc.x + DX[oc.dir] * (oc.length + k));
+    w.applyRoadPlan(w.planRoad(path, 1, false));
+    const tiles: number[] = [];
+    for (let k = 1; k < 10; k++) for (let s = 1; s <= 2; s++) tiles.push((oc.y + DY[oc.dir] * (oc.length + k) + DX[oc.dir] * s) * m.w + oc.x + DX[oc.dir] * (oc.length + k) - DY[oc.dir] * s);
+    w.city.paintZone(tiles, 1);
+    for (let i = 0; i < 5400; i++) w.step(0.1);
+    return { name: w.options.cityName as string, pop: w.city.population as number, money: w.money as number, segs: w.network.segments.length as number };
+  });
+  expect(before.pop).toBeGreaterThan(0);
+  await page.keyboard.press('Control+s');
+  await expect(page.locator('.toast', { hasText: 'City saved' })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: `Continue ${before.name}` }).click();
+  await page.waitForFunction(() => (window as unknown as G).__game?.world != null);
+  const after = await page.evaluate(() => {
+    const w = (window as unknown as G).__game.world;
+    return { name: w.options.cityName as string, pop: w.city.population as number, money: w.money as number, segs: w.network.segments.length as number };
+  });
+  expect(after.name).toBe(before.name);
+  expect(after.pop).toBe(before.pop);
+  expect(after.segs).toBe(before.segs);
+  expect(Math.round(after.money)).toBe(Math.round(before.money));
+  expect(errors).toEqual([]);
+});

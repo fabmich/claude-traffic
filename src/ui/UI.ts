@@ -3,7 +3,9 @@ import type { Game } from '../game/Game';
 import { TERRAIN_INFO } from '../world/terrain';
 import { clear, h, icon } from './dom';
 import { ICONS } from './icons';
+import { listSaves } from '../game/storage';
 import { createNewGameDialog } from './newGameDialog';
+import { showLoadDialog } from './saveUI';
 
 export interface ToolButtonDef {
   id: string;
@@ -187,12 +189,25 @@ export class UI {
   }
 
   showNewGameDialog(first = false): void {
+    const extras: HTMLElement[] = [];
+    const saves = listSaves();
+    if (saves.length) {
+      const last = saves[0];
+      const cont = h('button', { class: 'btn', type: 'button', title: `Day ${last.day} · ${formatInt(last.population)} residents` }, `Continue ${last.name}`);
+      cont.addEventListener('click', async () => {
+        if (await this.game.loadSaved(last.id)) this.closeModal();
+      });
+      const load = h('button', { class: 'btn', type: 'button' }, 'Load…');
+      load.addEventListener('click', () => showLoadDialog(this.game, first ? () => this.showNewGameDialog(true) : undefined));
+      extras.push(cont, load);
+    }
     const dlg = createNewGameDialog(
       (opts) => {
         this.closeModal();
         this.game.newGame(opts);
       },
       first ? null : () => this.closeModal(),
+      extras,
     );
     this.showModal(dlg, !first);
   }
@@ -287,6 +302,7 @@ export class UI {
       ['J · L · K · T', 'Junctions · Lanes · Speed limits · Transit'],
       ['Enter / Backspace while drawing a bus line', 'Finish the line / remove the last stop'],
       ['V · C', 'Views · City statistics and budget'],
+      ['Ctrl + S', 'Save the city (it is also saved automatically)'],
       ['Click a building, car or road', 'Show details (with no tool selected)'],
     ];
     const body = h(

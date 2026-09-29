@@ -1,4 +1,5 @@
 import { DAY_SECONDS, TILE } from '../config';
+import { b64ToBytes, bytesToB64 } from '../core/codec';
 import { Emitter } from '../core/events';
 import { MinHeap } from '../core/heap';
 import { Rng } from '../core/rng';
@@ -11,7 +12,7 @@ import type { Destination } from '../sim/vehicle';
 import { DX, DY } from '../world/grid';
 import { Terrain } from '../world/terrain';
 import { Building, BState, hasAccessRoad, Problem, resolveAccess, type Access } from './buildings';
-import { templatesFor, type BuildingTemplate } from './templates';
+import { TEMPLATES, templatesFor, type BuildingTemplate } from './templates';
 import { terrainAllows, Zone, ZONE_DEPTH } from './zones';
 
 const HOUR = DAY_SECONDS / 24;
@@ -94,6 +95,55 @@ export interface Budget {
 }
 
 const emptyBudget = (): Budget => ({ residential: 0, commercial: 0, industrial: 0, farming: 0, exports: 0, fares: 0, roads: 0, junctions: 0, transit: 0, imports: 0 });
+
+interface BuildingSave {
+  id: number;
+  t: string;
+  tiles: number[];
+  box: [number, number, number, number];
+  f: number;
+  rt: number;
+  seed: number;
+  lv: number;
+  st: number;
+  build: number;
+  hap: number;
+  good: number;
+  bad: number;
+  goods: number;
+  crops: number;
+  sales: number;
+  cust: number;
+  prod: number;
+  rich: number;
+  age: number;
+  com: number;
+  shop: number;
+  ab: number;
+}
+
+/** Save data of the city; citizens are stored field by field to keep saves small. */
+export interface CitySave {
+  zones: string;
+  buildings: BuildingSave[];
+  cit: Record<'id' | 'home' | 'job' | 'flags' | 'state' | 'trip' | 'shop' | 'start' | 'shift' | 'lwd' | 'com' | 'moved', number[]>;
+  demand: City['demand'];
+  attractiveness: number;
+  taxes: City['taxes'];
+  happiness: number;
+  budgetToday: Budget;
+  budgetYesterday: Budget;
+  milestone: number;
+  peakPopulation: number;
+  tripsStarted: number;
+  modeCounts: City['modeCounts'];
+  lastDay: number;
+  settled: number;
+  immigrationAcc: number;
+  rng: number;
+}
+
+const round = (v: number, k = 100): number => Math.round(v * k) / k;
 
 export type CityEvents = {
   tiles: TileRect[];
@@ -1148,6 +1198,165 @@ export class City {
     if (this.now - last < cooldown) return;
     this.noticeCooldown.set(key, this.now);
     this.events.emit('notice', text);
+  }
+
+  // ------------------------------------------------------------------ save games
+
+  save(): CitySave {
+    const buildings: BuildingSave[] = [];
+    for (const b of this.buildings) {
+      if (!b) continue;
+      buildings.push({
+        id: b.id,
+        t: b.template.key,
+        tiles: b.tiles,
+        box: [b.x0, b.y0, b.x1, b.y1],
+        f: b.facing,
+        rt: b.roadTile,
+        seed: b.seed,
+        lv: b.level,
+        st: b.state,
+        build: round(b.build),
+        hap: round(b.happiness),
+        good: round(b.goodTime, 1000),
+        bad: round(b.badTime, 1000),
+        goods: round(b.goods),
+        crops: round(b.crops),
+        sales: round(b.sales),
+        cust: round(b.customers),
+        prod: round(b.produced),
+        rich: b.rich,
+        age: round(b.age, 1000),
+        com: round(b.commute),
+        shop: round(b.shopOk, 1000),
+        ab: round(b.abandonedTime, 1000),
+      });
+    }
+    const cit: CitySave['cit'] = { id: [], home: [], job: [], flags: [], state: [], trip: [], shop: [], start: [], shift: [], lwd: [], com: [], moved: [] };
+    for (const c of this.citizens) {
+      if (!c) continue;
+      cit.id.push(c.id);
+      cit.home.push(c.home.id);
+      cit.job.push(c.job ? c.job.id : -1);
+      cit.flags.push((c.car ? 1 : 0) | (c.worker ? 2 : 0));
+      cit.state.push(c.state);
+      cit.trip.push(c.tripKind);
+      cit.shop.push(round(c.shopNeed));
+      cit.start.push(round(c.startHour));
+      cit.shift.push(round(c.shift));
+      cit.lwd.push(c.lastWorkDay);
+      cit.com.push(round(c.commute));
+      cit.moved.push(round(c.movedIn));
+    }
+    return {
+      zones: bytesToB64(this.zones),
+      buildings,
+      cit,
+      demand: { ...this.demand },
+      attractiveness: this.attractiveness,
+      taxes: { ...this.taxes },
+      happiness: this.happiness,
+      budgetToday: { ...this.budgetToday },
+      budgetYesterday: { ...this.budgetYesterday },
+      milestone: this.milestone,
+      peakPopulation: this.peakPopulation,
+      tripsStarted: this.tripsStarted,
+      modeCounts: { ...this.modeCounts },
+      lastDay: this.lastDay,
+      settled: this.settled,
+      immigrationAcc: this.immigrationAcc,
+      rng: this.rng.state,
+    };
+  }
+
+  /** Restores a saved city (the road network must already be rebuilt). Trips in progress end at their destination. */
+  load(d: CitySave): void {
+    const world = this.world;
+    this.zones.set(b64ToBytes(d.zones));
+    this.zoneTiles = [[], [], [], [], []];
+    for (let t = 0; t < this.zones.length; t++) if (this.zones[t]) this.zoneTiles[this.zones[t]].push(t);
+    world.buildingAt.fill(-1);
+    this.buildings.length = 0;
+    this.freeB = [];
+    for (const s of d.buildings) {
+      const tpl = TEMPLATES.find((t) => t.key === s.t);
+      if (!tpl) continue;
+      const b = new Building(s.id, tpl, s.tiles, s.box[0], s.box[1], s.box[2], s.box[3], s.f, s.rt, s.seed);
+      b.level = s.lv;
+      b.state = s.st;
+      b.build = s.build;
+      b.happiness = s.hap;
+      b.goodTime = s.good;
+      b.badTime = s.bad;
+      b.goods = s.goods;
+      b.crops = s.crops;
+      b.sales = s.sales;
+      b.customers = s.cust;
+      b.produced = s.prod;
+      b.rich = s.rich;
+      b.age = s.age;
+      b.commute = s.com;
+      b.shopOk = s.shop;
+      b.abandonedTime = s.ab;
+      this.buildings[s.id] = b;
+      for (const t of s.tiles) world.buildingAt[t] = s.id;
+    }
+    for (let i = 0; i < this.buildings.length; i++) {
+      if (!this.buildings[i]) {
+        this.buildings[i] = null;
+        this.freeB.push(i);
+      }
+    }
+    this.citizens.length = 0;
+    this.freeC = [];
+    this.queue.clear();
+    this.population = 0;
+    const cit = d.cit;
+    for (let k = 0; k < cit.id.length; k++) {
+      const home = this.buildings[cit.home[k]];
+      if (!home) continue;
+      const c = new Citizen(cit.id[k], home, (cit.flags[k] & 1) !== 0, (cit.flags[k] & 2) !== 0, this.rng);
+      const job = cit.job[k] >= 0 ? this.buildings[cit.job[k]] : null;
+      c.job = job && job.isWorkplace ? job : null;
+      c.shopNeed = cit.shop[k];
+      c.startHour = cit.start[k];
+      c.shift = cit.shift[k];
+      c.lastWorkDay = cit.lwd[k];
+      c.commute = cit.com[k];
+      c.movedIn = cit.moved[k];
+      // Travelling citizens arrive: commuters are at work, everybody else at home.
+      const atWork = c.job && (cit.state[k] === CState.Work || (cit.state[k] === CState.Travel && cit.trip[k] === TripKind.Work));
+      c.state = atWork ? CState.Work : CState.Home;
+      c.place = atWork ? c.job : home;
+      this.citizens[c.id] = c;
+      home.people.push(c.id);
+      if (c.job) c.job.people.push(c.id);
+      this.population++;
+      this.schedule(c, this.now + this.rng.next() * HOUR * (atWork ? c.shift : 1));
+    }
+    for (let i = 0; i < this.citizens.length; i++) {
+      if (!this.citizens[i]) {
+        this.citizens[i] = null;
+        this.freeC.push(i);
+      }
+    }
+    this.demand = { ...d.demand };
+    this.attractiveness = d.attractiveness;
+    this.taxes = { ...d.taxes };
+    this.happiness = d.happiness;
+    this.budgetToday = { ...d.budgetToday };
+    this.budgetYesterday = { ...d.budgetYesterday };
+    this.milestone = d.milestone;
+    this.peakPopulation = d.peakPopulation;
+    this.tripsStarted = d.tripsStarted;
+    this.modeCounts = { ...d.modeCounts };
+    this.lastDay = d.lastDay;
+    this.settled = d.settled;
+    this.immigrationAcc = d.immigrationAcc;
+    this.rng.state = d.rng;
+    this.onNetworkChanged();
+    this.updateDemand();
+    this.events.emit('tiles', [{ x0: 0, y0: 0, x1: world.map.w - 1, y1: world.map.h - 1 }]);
   }
 
   // ------------------------------------------------------------------ main step

@@ -1227,3 +1227,68 @@ table.budget tr.net td {
   cursor: pointer;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
 }
+
+/* ---------- Saves & settings ---------- */
+.modal-actions .spacer {
+  flex: 1;
+}
+
+.load-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.save-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.save-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.save-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.save-info span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.settings {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.setting {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 10px 0;
+  cursor: pointer;
+}
+
+.setting input {
+  margin-top: 3px;
+}
+
+.setting span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.setting small {
+  color: var(--muted);
+}

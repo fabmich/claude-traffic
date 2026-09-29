@@ -8,7 +8,7 @@ import { ICONS } from './icons';
 import { randomCityName } from './names';
 
 /** Modal dialog to configure and start a new city, with a live terrain preview. */
-export function createNewGameDialog(onStart: (o: NewGameOptions) => void, onCancel: (() => void) | null): HTMLElement {
+export function createNewGameDialog(onStart: (o: NewGameOptions) => void, onCancel: (() => void) | null, extraActions: HTMLElement[] = []): HTMLElement {
   let seed = randomSeed();
   let sizeKey: MapSizeKey = 'medium';
   let sandbox = false;
@@ -121,7 +121,7 @@ export function createNewGameDialog(onStart: (o: NewGameOptions) => void, onCanc
         ),
         h('div', { class: 'ng-preview' }, preview, legend),
       ),
-      h('div', { class: 'modal-actions' }, cancel, start),
+      h('div', { class: 'modal-actions' }, ...extraActions, extraActions.length ? h('span', { class: 'spacer' }) : null, cancel, start),
     ),
   );
   redraw();

@@ -1,3 +1,4 @@
+import { b64ToBytes, bytesToB64 } from '../core/codec';
 import { DX, DY, opposite } from '../world/grid';
 
 export type SpanKind = 'bridge' | 'tunnel';
@@ -18,6 +19,14 @@ export interface Span {
   flags: number;
   speed: number;
   attr: number;
+}
+
+export interface RoadLayerSave {
+  type: string;
+  flags: string;
+  speed: string;
+  attr: string;
+  spans: Span[];
 }
 
 export const EDGE_ONEWAY_REV = 1;
@@ -249,6 +258,28 @@ export class RoadLayer {
     const e = x < this.w - 1 ? tile + 1 : -1;
     const wv = x > 0 ? tile - 1 : -1;
     return (n >= 0 && (this.edgeType(n, 1) !== 0 || this.edgeType(n, 3) !== 0)) || (e >= 0 && this.edgeType(e, 3) !== 0) || (wv >= 0 && this.edgeType(wv, 1) !== 0);
+  }
+
+  /** Plain data for save games. */
+  save(): RoadLayerSave {
+    return { type: bytesToB64(this.type), flags: bytesToB64(this.flags), speed: bytesToB64(this.speed), attr: bytesToB64(this.attr), spans: [...this.spans.values()].map((s) => ({ ...s })) };
+  }
+
+  load(d: RoadLayerSave): void {
+    this.type.set(b64ToBytes(d.type));
+    this.flags.set(b64ToBytes(d.flags));
+    this.speed.set(b64ToBytes(d.speed));
+    this.attr.set(b64ToBytes(d.attr));
+    for (const id of [...this.spans.keys()]) this.removeSpan(id);
+    let maxId = 0;
+    for (const sp of d.spans) {
+      const { id, ...rest } = sp;
+      this.nextSpanId = id;
+      this.addSpan(rest);
+      maxId = Math.max(maxId, id);
+    }
+    this.nextSpanId = maxId + 1;
+    this.version++;
   }
 
   hasRoad(tile: number): boolean {

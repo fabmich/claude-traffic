@@ -9,11 +9,14 @@ import { Renderer } from '../render/Renderer';
 import { drawCongestion, drawSignals, drawVehicles } from '../render/vehicleDraw';
 import type { Line, Stop } from '../transit/Transit';
 import { setupCityUI, type CityToolset } from '../ui/cityUI';
+import { setupSaveUI } from '../ui/saveUI';
 import { openSelectionPanel } from '../ui/panels/inspectPanels';
 import { setupToolbar } from '../ui/toolbarSetup';
 import { setupTrafficTools, type TrafficToolset } from '../ui/trafficToolsSetup';
 import { setupTransitUI, type TransitToolset } from '../ui/transitUI';
 import { UI } from '../ui/UI';
+import { loadWorld, metaOf, saveWorld, type SaveGame } from './save';
+import { AUTOSAVE_ID, loadSettings, readSave, storeSave, storeSettings, type Settings } from './storage';
 import { World, type NewGameOptions } from './World';
 
 export type GameEvents = {
@@ -46,8 +49,10 @@ export class Game {
   speedIndex = 0;
   fps = 60;
   overlay: OverlayKind = 'none';
+  settings: Settings = loadSettings();
   private acc = 0;
   private lastT = 0;
+  private autosaveTimer = 0;
   readonly tools: ReturnType<typeof setupToolbar>;
   readonly trafficTools: TrafficToolset;
   readonly cityTools: CityToolset;
@@ -87,6 +92,8 @@ export class Game {
     this.trafficTools = setupTrafficTools(this);
     this.cityTools = setupCityUI(this);
     this.transitTools = setupTransitUI(this);
+    setupSaveUI(this);
+    this.applySettings(this.settings);
     this.events.on('select', (sel) => openSelectionPanel(this, sel));
   }
 
@@ -96,15 +103,82 @@ export class Game {
   }
 
   newGame(options: NewGameOptions): void {
+    this.setWorld(new World(options));
+    this.focusStart();
+  }
+
+  private setWorld(world: World): void {
     this.setTool(null);
     this.tools.inspect.select(null);
-    this.world = new World(options);
-    this.renderer.setWorld(this.world);
+    this.ui.closePanels();
+    this.world = world;
+    world.traffic.settings.despawnStuck = this.settings.despawnStuck;
+    this.renderer.setWorld(world);
     this.acc = 0;
+    this.autosaveTimer = 0;
     this.paused = false;
-    this.focusStart();
-    this.events.emit('newGame', this.world);
+    this.events.emit('newGame', world);
     this.events.emit('speed', { paused: this.paused, speedIndex: this.speedIndex });
+  }
+
+  /** Save data of the current city, including the camera. */
+  snapshot(): SaveGame | null {
+    const world = this.world;
+    if (!world) return null;
+    const data = saveWorld(world);
+    const cam = this.renderer.camera;
+    data.camera = { x: cam.x, y: cam.y, zoom: cam.zoom };
+    return data;
+  }
+
+  /** Slot id of the manual save of the current city. */
+  get saveId(): string {
+    const w = this.world;
+    if (!w) return 'city';
+    return `${w.options.seed}-${w.options.cityName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  }
+
+  /** Saves to browser storage. Returns an error message or null. */
+  async saveGame(id = this.saveId): Promise<string | null> {
+    const data = this.snapshot();
+    if (!data || !this.world) return 'There is no city to save';
+    return storeSave(metaOf(this.world, id), data);
+  }
+
+  /** Replaces the current game with a saved one. Throws if the data is not a valid save. */
+  loadGame(data: SaveGame): void {
+    const world = loadWorld(data);
+    this.setWorld(world);
+    const cam = this.renderer.camera;
+    if (data.camera) {
+      cam.x = data.camera.x;
+      cam.y = data.camera.y;
+      cam.setZoom(data.camera.zoom);
+    } else this.focusStart();
+  }
+
+  async loadSaved(id: string): Promise<boolean> {
+    const data = await readSave(id);
+    if (!data) {
+      this.ui.toast('This save could not be read', 'warn');
+      return false;
+    }
+    try {
+      this.loadGame(data);
+      return true;
+    } catch (e) {
+      this.ui.toast(e instanceof Error ? e.message : 'This save could not be loaded', 'warn');
+      return false;
+    }
+  }
+
+  applySettings(s: Settings): void {
+    this.settings = s;
+    storeSettings(s);
+    if (this.world) this.world.traffic.settings.despawnStuck = s.despawnStuck;
+    const root = document.documentElement;
+    if (s.theme === 'auto') delete root.dataset.theme;
+    else root.dataset.theme = s.theme;
   }
 
   setOverlay(o: OverlayKind): void {
@@ -191,6 +265,13 @@ export class Game {
         if (steps === MAX_STEPS_PER_FRAME) this.acc = Math.min(this.acc, SIM_DT);
       }
       this.renderer.alpha = this.paused ? 1 : this.acc / SIM_DT;
+    }
+    if (world && this.settings.autosave) {
+      this.autosaveTimer += dtReal;
+      if (this.autosaveTimer > 120) {
+        this.autosaveTimer = 0;
+        void this.saveGame(AUTOSAVE_ID);
+      }
     }
     this.renderer.render();
     this.ui.update(dtReal);

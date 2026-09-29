@@ -75,4 +75,12 @@ export class JunctionSettings {
   clear(): void {
     this.map.clear();
   }
+
+  save(): Array<[number, JunctionSetting]> {
+    return [...this.map.entries()].map(([t, js]) => [t, JSON.parse(JSON.stringify(js)) as JunctionSetting]);
+  }
+
+  load(entries: Array<[number, JunctionSetting]>): void {
+    this.map = new Map(entries);
+  }
 }
