@@ -80,6 +80,8 @@ export function paintTerrain(
   tx1: number,
   ty1: number,
   pxPerTile: number,
+  /** Tiles where trees were cleared (roads, buildings). */
+  occupied?: (t: number) => boolean,
 ): void {
   const { w, h, terrain } = map;
   const half = TILE / 2;
@@ -182,7 +184,7 @@ export function paintTerrain(
   // Trees last so canopies can overlap neighbouring tiles slightly.
   for (let y = Math.max(0, ty0 - 1); y < Math.min(h, ty1 + 1); y++) {
     for (let x = Math.max(0, tx0 - 1); x < Math.min(w, tx1 + 1); x++) {
-      if (terrain[y * w + x] !== Terrain.Forest) continue;
+      if (terrain[y * w + x] !== Terrain.Forest || occupied?.(y * w + x)) continue;
       drawTrees(ctx, x, y, map.seed, pxPerTile >= 24);
     }
   }

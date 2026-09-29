@@ -1,8 +1,10 @@
 import { TILE } from '../config';
 import type { World } from '../game/World';
+import { occupiedTile, paintCity } from './buildingDraw';
 import { Camera } from './camera';
 import { ChunkLayer } from './chunkCache';
 import { PAL } from './palette';
+import { paintRoadsElevated, paintRoadsGround } from './roadDraw';
 import { paintTerrain, TerrainColors } from './terrainDraw';
 
 /** A function that draws on top of the map in world coordinates (1 unit = 1 meter). */
@@ -18,12 +20,16 @@ export class Renderer {
   showGrid = false;
   /** Extra painters for the static ground layer (roads, buildings...), called after terrain. */
   groundPainters: Array<(ctx: CanvasRenderingContext2D, tx0: number, ty0: number, tx1: number, ty1: number, ppt: number) => void> = [];
-  /** Dynamic drawers called every frame in world space, in order. */
+  /** Dynamic drawers called every frame in world space, in order (below bridges). */
   dynamicDrawers: WorldDrawer[] = [];
+  /** Dynamic drawers above bridges (vehicles on bridges, signals). */
+  upperDrawers: WorldDrawer[] = [];
   /** Drawers above everything else (tool previews, selection). */
   overlayDrawers: WorldDrawer[] = [];
   private world: World | null = null;
   private ground: ChunkLayer | null = null;
+  private elevated: ChunkLayer | null = null;
+  private unsubscribe: (() => void) | null = null;
   terrainColors: TerrainColors | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -38,20 +44,40 @@ export class Renderer {
     this.ground?.dispose();
     this.terrainColors = new TerrainColors(world.map);
     const colors = this.terrainColors;
+    const occupied = (t: number): boolean => occupiedTile(world, t);
     this.ground = new ChunkLayer(world.map.w, world.map.h, (ctx, tx0, ty0, tx1, ty1, ppt) => {
-      paintTerrain(ctx, world.map, colors, tx0, ty0, tx1, ty1, ppt);
+      paintTerrain(ctx, world.map, colors, tx0, ty0, tx1, ty1, ppt, occupied);
+      paintCity(ctx, world, tx0, ty0, tx1, ty1, ppt);
+      paintRoadsGround(ctx, world.network, world.map.w, tx0, ty0, ppt);
       for (const p of this.groundPainters) p(ctx, tx0, ty0, tx1, ty1, ppt);
       return true;
     });
+    this.elevated?.dispose();
+    this.elevated = new ChunkLayer(world.map.w, world.map.h, (ctx, tx0, ty0, _tx1, _ty1, ppt) =>
+      paintRoadsElevated(ctx, world.network, world.map.w, tx0, ty0, ppt),
+    );
+    this.unsubscribe?.();
+    const offNet = world.events.on('network', (rects) => {
+      for (const r of rects) this.invalidateTiles(r.x0, r.y0, r.x1, r.y1);
+    });
+    const offTiles = world.events.on('tiles', (rects) => {
+      for (const r of rects) this.ground?.invalidateTiles(r.x0 - 1, r.y0 - 1, r.x1 + 1, r.y1 + 1);
+    });
+    this.unsubscribe = () => {
+      offNet();
+      offTiles();
+    };
   }
 
   /** Marks the static ground layer stale in an inclusive tile rectangle. */
   invalidateTiles(tx0: number, ty0: number, tx1: number, ty1: number): void {
     this.ground?.invalidateTiles(tx0, ty0, tx1, ty1);
+    this.elevated?.invalidateTiles(tx0, ty0, tx1, ty1);
   }
 
   invalidateAll(): void {
     this.ground?.invalidateAll();
+    this.elevated?.invalidateAll();
   }
 
   resize(): void {
@@ -73,6 +99,26 @@ export class Renderer {
     const cam = this.camera;
     const s = cam.zoom * this.dpr;
     ctx.setTransform(s, 0, 0, s, (cam.viewW / 2) * this.dpr - cam.x * s, (cam.viewH / 2) * this.dpr - cam.y * s);
+  }
+
+  /** Draws a text label in screen space anchored at a world position (restores the world transform). */
+  label(text: string, wx: number, wy: number, opts: { color?: string; bg?: string; dy?: number; font?: string } = {}): void {
+    const ctx = this.ctx;
+    const cam = this.camera;
+    const sx = cam.worldToScreenX(wx);
+    const sy = cam.worldToScreenY(wy) + (opts.dy ?? 0);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.font = opts.font ?? '600 12px system-ui, sans-serif';
+    const w = ctx.measureText(text).width + 12;
+    ctx.fillStyle = opts.bg ?? 'rgba(20, 30, 40, 0.82)';
+    ctx.beginPath();
+    ctx.roundRect(sx - w / 2, sy - 11, w, 22, 6);
+    ctx.fill();
+    ctx.fillStyle = opts.color ?? '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, sx, sy);
+    this.applyWorldTransform();
   }
 
   /** CSS pixels per meter. */
@@ -102,6 +148,9 @@ export class Renderer {
 
     this.applyWorldTransform();
     for (const d of this.dynamicDrawers) d(ctx, this);
+    this.elevated?.draw(ctx, this.camera, this.dpr, 4);
+    this.applyWorldTransform();
+    for (const d of this.upperDrawers) d(ctx, this);
 
     // Night tint.
     const light = world.clock.daylight;
