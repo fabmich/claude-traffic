@@ -1,9 +1,12 @@
 import { MAX_STEPS_PER_FRAME, SIM_DT, SPEED_LEVELS, TILE, TIME_SCALE } from '../config';
 import { Emitter } from '../core/events';
 import { Input } from '../input/Input';
+import type { Selection } from '../input/tools/InspectTool';
 import type { PointerInfo, Tool } from '../input/tool';
 import { drawOutsideMarkers } from '../render/markers';
 import { Renderer } from '../render/Renderer';
+import { drawCongestion, drawSignals, drawVehicles } from '../render/vehicleDraw';
+import { openSelectionPanel } from '../ui/panels/inspectPanels';
 import { setupToolbar } from '../ui/toolbarSetup';
 import { UI } from '../ui/UI';
 import { World, type NewGameOptions } from './World';
@@ -14,7 +17,12 @@ export type GameEvents = {
   tool: Tool | null;
   hover: PointerInfo;
   frame: number;
+  select: Selection;
+  openJunction: number;
+  overlay: string;
 };
+
+export type OverlayKind = 'none' | 'traffic';
 
 /** Browser shell around a World: owns the render loop, input, tools and UI. */
 export class Game {
@@ -28,8 +36,10 @@ export class Game {
   paused = false;
   speedIndex = 0;
   fps = 60;
+  overlay: OverlayKind = 'none';
   private acc = 0;
   private lastT = 0;
+  readonly tools: ReturnType<typeof setupToolbar>;
 
   constructor(readonly root: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -40,17 +50,34 @@ export class Game {
     this.input = new Input(this, this.canvas);
     window.addEventListener('resize', () => this.renderer.resize());
     this.renderer.resize();
-    this.renderer.upperDrawers.push((ctx, r) => {
-      if (this.world) drawOutsideMarkers(ctx, r, this.world);
+    const selectedVehicle = () => {
+      const sel = this.tools.inspect.selection;
+      return sel?.kind === 'vehicle' ? sel.vehicle : null;
+    };
+    this.renderer.dynamicDrawers.push((ctx, r) => {
+      if (!this.world) return;
+      if (this.overlay === 'traffic') drawCongestion(ctx, r, this.world.traffic);
+      drawVehicles(ctx, r, this.world.traffic, 'ground', selectedVehicle());
     });
-    this.renderer.overlayDrawers.push((ctx, r) => this.tool?.drawOverlay?.(ctx, r));
+    this.renderer.upperDrawers.push((ctx, r) => {
+      if (!this.world) return;
+      drawVehicles(ctx, r, this.world.traffic, 'upper', selectedVehicle());
+      drawSignals(ctx, r, this.world.traffic.controls);
+      drawOutsideMarkers(ctx, r, this.world);
+    });
+    this.renderer.overlayDrawers.push((ctx, r) => this.activeTool.drawOverlay?.(ctx, r));
     this.tools = setupToolbar(this);
+    this.events.on('select', (sel) => openSelectionPanel(this, sel));
   }
 
-  readonly tools: ReturnType<typeof setupToolbar>;
+  /** The selected tool, or the inspect tool when none is selected. */
+  get activeTool(): Tool {
+    return this.tool ?? this.tools.inspect;
+  }
 
   newGame(options: NewGameOptions): void {
     this.setTool(null);
+    this.tools.inspect.select(null);
     this.world = new World(options);
     this.renderer.setWorld(this.world);
     this.acc = 0;
@@ -58,6 +85,11 @@ export class Game {
     this.focusStart();
     this.events.emit('newGame', this.world);
     this.events.emit('speed', { paused: this.paused, speedIndex: this.speedIndex });
+  }
+
+  setOverlay(o: OverlayKind): void {
+    this.overlay = o;
+    this.events.emit('overlay', o);
   }
 
   /** Centres the camera on the first outside connection. */
@@ -92,8 +124,12 @@ export class Game {
   /** Right click / Escape: lets the tool cancel an action, otherwise deselects it. */
   cancelTool(): void {
     if (this.tool?.cancel?.()) return;
-    if (this.ui.closeTopPanel()) return;
-    this.setTool(null);
+    if (this.tool) {
+      this.setTool(null);
+      return;
+    }
+    if (this.tools.inspect.cancel()) return;
+    this.ui.closeTopPanel();
   }
 
   togglePause(): void {

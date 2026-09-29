@@ -6,7 +6,9 @@ import type { Network } from '../roads/network';
 import { planBulldoze, planRoad, type BulldozePlan, type PlanContext, type RoadPlan } from '../roads/placement';
 import { RoadLayer } from '../roads/roadLayer';
 import { ROAD } from '../roads/roadTypes';
-import { JunctionSettings } from '../roads/settings';
+import { JunctionSettings, type JunctionSetting } from '../roads/settings';
+import { TrafficGenerator } from '../sim/generator';
+import { TrafficSim } from '../sim/Traffic';
 import { DX, DY } from '../world/grid';
 import { generateMap } from '../world/mapgen';
 import type { WorldMap } from '../world/WorldMap';
@@ -46,6 +48,8 @@ export class World {
   /** Building id per tile (-1 = none). */
   readonly buildingAt: Int32Array;
   network: Network;
+  readonly traffic: TrafficSim;
+  readonly generator: TrafficGenerator;
   money: number;
   private compileCache = new CompileCache();
   private segSigs = new Map<string, TileRect>();
@@ -61,6 +65,12 @@ export class World {
     this.buildOutsideStubs();
     this.network = this.compile();
     this.rememberSignatures();
+    this.traffic = new TrafficSim(this.network, this.junctions, options.seed);
+    this.generator = new TrafficGenerator(
+      () => this.traffic,
+      () => this.network,
+      options.seed,
+    );
   }
 
   get sandbox(): boolean {
@@ -118,6 +128,12 @@ export class World {
     if (plan.edges.length || plan.spans.length) this.rebuildNetwork();
   }
 
+  /** Changes the settings of a junction (signs, lights, lanes...) and recompiles. */
+  updateJunction(tile: number, fn: (s: JunctionSetting) => void): void {
+    fn(this.junctions.ensure(tile));
+    this.rebuildNetwork();
+  }
+
   private compile(): Network {
     return compileNetwork({ layer: this.roads, settings: this.junctions, outside: this.map.outside, cache: this.compileCache });
   }
@@ -127,6 +143,7 @@ export class World {
     const oldSeg = this.segSigs;
     const oldNode = this.nodeSigs;
     this.network = this.compile();
+    this.traffic?.setNetwork(this.network, this.junctions);
     this.rememberSignatures();
     const dirty: TileRect[] = [];
     for (const [sig, r] of this.segSigs) if (!oldSeg.has(sig)) dirty.push(r);
@@ -151,11 +168,13 @@ export class World {
     const w = this.map.w;
     for (const n of this.network.nodes) {
       const arms = n.arms.map((a) => `${a.dir}:${a.segment.type.id}:${a.trim.toFixed(2)}:${a.nIn}/${a.nOut}`).join(',');
-      const lanes = n.connectors.length;
-      const sig = `${n.tile}|${arms}|${n.control}|${lanes}`;
+      const lanes = n.connectors.map((c) => c.key).join(',');
+      const js = this.junctions.get(n.ringOf ?? n.tile);
+      const sig = `${n.key}|${arms}|${n.control}|${lanes}|${js ? JSON.stringify(js) : ''}`;
       const x = n.tile % w;
       const y = (n.tile - x) / w;
-      this.nodeSigs.set(sig, { x0: x - 2, y0: y - 2, x1: x + 2, y1: y + 2 });
+      const r = n.ringOf !== null ? 3 : 2;
+      this.nodeSigs.set(sig, { x0: x - r, y0: y - r, x1: x + r, y1: y + r });
     }
   }
 
@@ -174,5 +193,7 @@ export class World {
   /** Advances the simulation by dt simulated seconds. */
   step(dt: number): void {
     this.clock.advance(dt);
+    this.generator.step(dt);
+    this.traffic.step(dt);
   }
 }

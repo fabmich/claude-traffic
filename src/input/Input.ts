@@ -67,7 +67,7 @@ export class Input {
     }
     if (e.button === 0) {
       this.leftDown = true;
-      this.game.tool?.pointerDown?.(p);
+      this.game.activeTool.pointerDown?.(p);
     }
   };
 
@@ -83,7 +83,7 @@ export class Input {
       this.panning.sy = p.sy;
       return;
     }
-    this.game.tool?.pointerMove?.(p);
+    this.game.activeTool.pointerMove?.(p);
     this.game.events.emit('hover', p);
   };
 
@@ -97,7 +97,7 @@ export class Input {
     }
     if (e.button === 0 && this.leftDown) {
       this.leftDown = false;
-      this.game.tool?.pointerUp?.(p);
+      this.game.activeTool.pointerUp?.(p);
     }
   };
 

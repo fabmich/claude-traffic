@@ -28,6 +28,8 @@ export interface RoadType {
   medianColor: string;
   edgeColor: string;
   description: string;
+  /** Internal type (roundabout rings) not offered in the toolbar. */
+  hidden?: boolean;
 }
 
 const T = (t: Omit<RoadType, 'id'>, id: number): RoadType => ({ ...t, id });
@@ -188,6 +190,52 @@ export const ROAD_TYPES: readonly RoadType[] = [
       description: 'One-lane one-way connector for interchanges.',
     },
     7,
+  ),
+  T(
+    {
+      key: 'ring1',
+      name: 'Roundabout ring',
+      lanesF: 1,
+      lanesB: 0,
+      speedKmh: 25,
+      median: 0,
+      shoulder: 0.8,
+      access: false,
+      highway: false,
+      cost: 0,
+      upkeep: 0,
+      unlockPop: 0,
+      rank: 2,
+      asphalt: '#5f656d',
+      medianColor: '#5f656d',
+      edgeColor: '#d9d5cc',
+      description: 'Single-lane roundabout ring.',
+      hidden: true,
+    },
+    8,
+  ),
+  T(
+    {
+      key: 'ring2',
+      name: 'Roundabout ring (2 lanes)',
+      lanesF: 2,
+      lanesB: 0,
+      speedKmh: 35,
+      median: 0,
+      shoulder: 0.8,
+      access: false,
+      highway: false,
+      cost: 0,
+      upkeep: 0,
+      unlockPop: 0,
+      rank: 3,
+      asphalt: '#5a6068',
+      medianColor: '#5a6068',
+      edgeColor: '#d9d5cc',
+      description: 'Two-lane roundabout ring.',
+      hidden: true,
+    },
+    9,
   ),
 ];
 

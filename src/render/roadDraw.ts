@@ -148,10 +148,14 @@ function drawNode(ctx: CanvasRenderingContext2D, node: RoadNode): void {
 
 function drawStopLines(ctx: CanvasRenderingContext2D, node: RoadNode): void {
   if (node.arms.length < 3 && node.control === 'auto') return;
+  const ring = node.ringOf !== null;
   ctx.strokeStyle = MARK;
   ctx.lineWidth = 0.45;
   ctx.lineCap = 'butt';
+  // Roundabout entries get a dashed give-way line; the ring itself has none.
+  ctx.setLineDash(ring ? [0.6, 0.5] : []);
   for (const arm of node.arms) {
+    if (ring && arm.dir >= 8) continue;
     for (const lane of arm.ins) {
       const p = lane.path;
       const h = p.endHeading();
@@ -165,11 +169,12 @@ function drawStopLines(ctx: CanvasRenderingContext2D, node: RoadNode): void {
       ctx.stroke();
     }
   }
+  ctx.setLineDash([]);
 }
 
 /** Painted arrows showing which way each lane may turn. */
 export function drawLaneArrows(ctx: CanvasRenderingContext2D, node: RoadNode, color = MARK): void {
-  if (node.arms.length < 3 || node.outside) return;
+  if (node.arms.length < 3 || node.outside || node.ringOf !== null) return;
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = 0.32;
@@ -282,6 +287,31 @@ function drawTunnels(ctx: CanvasRenderingContext2D, seg: Segment): void {
   }
 }
 
+/** Grass islands in the middle of roundabouts. */
+function drawRoundaboutIslands(ctx: CanvasRenderingContext2D, net: Network, tx0: number, ty0: number): void {
+  const x0 = tx0 * TILE;
+  const y0 = ty0 * TILE;
+  const x1 = x0 + CHUNK * TILE;
+  const y1 = y0 + CHUNK * TILE;
+  for (const rb of net.roundabouts.values()) {
+    const r = rb.radius + rb.halfWidth + 4;
+    if (rb.x + r < x0 || rb.x - r > x1 || rb.y + r < y0 || rb.y - r > y1) continue;
+    const ri = rb.radius - rb.halfWidth - 0.2;
+    ctx.fillStyle = '#d9d5cc';
+    ctx.beginPath();
+    ctx.arc(rb.x, rb.y, ri, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#9cc585';
+    ctx.beginPath();
+    ctx.arc(rb.x, rb.y, Math.max(0.5, ri - 0.9), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#6ea55a';
+    ctx.beginPath();
+    ctx.arc(rb.x, rb.y, Math.max(0.3, ri * 0.35), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 /** Ground-level roads for one render chunk. */
 export function paintRoadsGround(ctx: CanvasRenderingContext2D, net: Network, mapW: number, tx0: number, ty0: number, ppt: number): void {
   const cols = Math.ceil(mapW / CHUNK);
@@ -297,6 +327,7 @@ export function paintRoadsGround(ctx: CanvasRenderingContext2D, net: Network, ma
   const sorted = [...segs].sort((a, b) => a.type.rank - b.type.rank);
   for (const seg of sorted) drawSegmentBody(ctx, seg, ranges.get(seg)!, ppt);
   for (const node of nodes) drawNode(ctx, node);
+  drawRoundaboutIslands(ctx, net, tx0, ty0);
   for (const seg of segs) drawTunnels(ctx, seg);
   if (ppt >= 14) for (const node of nodes) drawStopLines(ctx, node);
   if (ppt >= 28) for (const node of nodes) drawLaneArrows(ctx, node);

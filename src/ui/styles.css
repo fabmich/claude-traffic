@@ -721,3 +721,8 @@ kbd {
   width: 28px;
   height: 24px;
 }
+
+.tb-extra-inner {
+  display: flex;
+  align-items: center;
+}

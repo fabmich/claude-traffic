@@ -8,6 +8,7 @@ import { customPairs, defaultConnections, type LanePair } from './laneDefaults';
 import { Connector, Lane, Network, RoadNode, Segment, type Arm } from './network';
 import { ATTR_BUS_LANE, ATTR_TRUCK_BAN, type Link, type RoadLayer, type Span } from './roadLayer';
 import { ROAD_TYPES, roadWidth, type RoadType } from './roadTypes';
+import { buildRingSegments, planRoundabouts, ringLanePairs, ringNodePolygon } from './roundabout';
 import type { JunctionSettings } from './settings';
 
 export interface CompileInput {
@@ -50,7 +51,7 @@ export class CompileCache {
 }
 
 function nodeSignature(node: RoadNode, settings: JunctionSettings): string {
-  let s = `${node.tile}|${node.control}|${node.outside ? 1 : 0}|`;
+  let s = `${node.key}|${node.control}|${node.outside ? 1 : 0}|`;
   for (const a of node.arms) {
     s += `${a.dir},${a.trim.toFixed(3)},${a.halfWidth},${a.nIn},${a.nOut};`;
     for (const l of a.ins) s += `i${l.path.x1.toFixed(2)},${l.path.y1.toFixed(2)},${l.path.endHeading().toFixed(3)},${l.speedLimit.toFixed(2)};`;
@@ -333,6 +334,17 @@ export function compileNetwork(input: CompileInput): Network {
     computeArmTrims(node);
   }
 
+  // 5b. Roundabouts become rings of small merge/diverge junctions.
+  const rings = planRoundabouts(net.nodes, settings);
+  if (rings.plans.length) {
+    net.nodes = rings.nodes;
+    for (const p of rings.plans) net.nodeByTile.delete(p.center.tile);
+    for (const bd of builds) {
+      bd.a = bd.armA.node;
+      bd.b = bd.armB.node;
+    }
+  }
+
   // 6. Segments and lanes.
   for (const bd of builds) {
     const { d, type, armA, armB, nF, nB } = bd;
@@ -441,6 +453,10 @@ export function compileNetwork(input: CompileInput): Network {
     const pad = roadWidth(type) / 2 + 2;
     seg.bbox = { x0: bb.x0 - pad, y0: bb.y0 - pad, x1: bb.x1 + pad, y1: bb.y1 + pad };
   }
+  for (const p of rings.plans) {
+    buildRingSegments(net, p);
+    for (const s of p.subs) s.arms.sort((x, y) => x.dir - y.dir);
+  }
 
   // 7. Junction connectors, conflicts and outlines.
   for (const node of net.nodes) {
@@ -452,11 +468,18 @@ export function compileNetwork(input: CompileInput): Network {
       restoreConnectors(net, node, hit);
       continue;
     }
-    buildConnectors(net, node, settings);
-    computeConflicts(node);
-    const outline = buildNodePolygon(node);
-    node.polygon = outline.polygon;
-    node.curbs = outline.curbs;
+    if (node.ringOf !== null) {
+      addPairs(net, node, ringLanePairs(node));
+      computeConflicts(node);
+      node.polygon = ringNodePolygon(node, net.roundabouts.get(node.ringOf)?.halfWidth ?? 3);
+      node.curbs = [];
+    } else {
+      buildConnectors(net, node, settings);
+      computeConflicts(node);
+      const outline = buildNodePolygon(node);
+      node.polygon = outline.polygon;
+      node.curbs = outline.curbs;
+    }
     if (cache) {
       cache.misses++;
       const index = new Map(node.connectors.map((c, i) => [c, i]));
@@ -509,7 +532,7 @@ function restoreConnectors(net: Network, node: RoadNode, e: NodeCacheEntry): voi
     const outArm = node.armByDir(cd.outDir)!;
     const from = inArm.ins[cd.inIdx];
     const to = outArm.outs[cd.outIdx];
-    const key = `${node.tile}|${cd.inDir}.${cd.inIdx}>${cd.outDir}.${cd.outIdx}`;
+    const key = `${node.key}|${cd.inDir}.${cd.inIdx}>${cd.outDir}.${cd.outIdx}`;
     const c = new Connector(net.connectors.length, key, node, from, to, inArm, outArm, cd.turn, cd.path, cd.maxSpeed);
     net.connectors.push(c);
     net.connectorByKey.set(key, c);
@@ -546,9 +569,14 @@ export function buildConnectors(net: Network, node: RoadNode, settings: Junction
     }
     pairs = pairs.filter((p) => !overridden.has(p.from)).concat(extra);
   }
+  addPairs(net, node, pairs);
+}
+
+/** Creates connector objects (geometry, speed) for lane pairs of a node. */
+export function addPairs(net: Network, node: RoadNode, pairs: LanePair[]): void {
   const seen = new Set<string>();
   for (const p of pairs) {
-    const key = `${node.tile}|${p.inArm.dir}.${p.from.index}>${p.outArm.dir}.${p.to.index}`;
+    const key = `${node.key}|${p.inArm.dir}.${p.from.index}>${p.outArm.dir}.${p.to.index}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const path = connectorPath(p.from, p.to, p.turn);

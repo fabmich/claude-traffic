@@ -27,7 +27,11 @@ export class Lane {
   /** Traffic statistics (EMA of speed ratio, vehicle count) for routing and overlays. */
   statSpeed = 1;
   statFlow = 0;
+  /** EMA of seconds vehicles wait at the end of this lane. */
+  statWait = 0;
   busOnly = false;
+  /** Vehicles in neighbouring lanes that urgently need to merge into this lane. */
+  mergers: Vehicle[] = [];
 
   constructor(
     readonly id: number,
@@ -65,8 +69,12 @@ export interface Conflict {
 
 export class Connector {
   conflicts: Conflict[] = [];
-  /** Vehicles currently committed to or driving on this connector. */
+  /** Vehicles driving on this connector, front first. */
   vehicles: Vehicle[] = [];
+  /** Vehicles allowed to enter but still before the stop line. */
+  granted: Vehicle[] = [];
+  /** Vehicles approaching the stop line that plan to use this connector (rebuilt every step). */
+  approaching: Vehicle[] = [];
   /** Traffic signal group index for signalized junctions (-1 if none). */
   signalGroup = -1;
 
@@ -122,13 +130,20 @@ export class RoadNode {
   control: ControlKind = 'auto';
   /** Radius of the roundabout ring centreline if this node is (part of) a roundabout. */
   ringRadius = 0;
+  /** For roundabout ring nodes: tile of the roundabout centre (its settings key). */
+  ringOf: number | null = null;
+  /** Unique key used in connector keys ("tile" or "tile r index" for ring nodes). */
+  key: string;
 
   constructor(
-    readonly id: number,
+    public id: number,
     readonly tile: number,
     readonly x: number,
     readonly y: number,
-  ) {}
+    key?: string,
+  ) {
+    this.key = key ?? String(tile);
+  }
 
   get isDeadEnd(): boolean {
     return this.arms.length === 1 && !this.outside;
@@ -199,6 +214,8 @@ export class Network {
   laneByKey = new Map<string, Lane>();
   connectorByKey = new Map<string, Connector>();
   segByKey = new Map<string, Segment>();
+  /** Roundabouts by centre tile: ring nodes and geometry for drawing the island. */
+  roundabouts = new Map<number, { nodes: RoadNode[]; x: number; y: number; radius: number; halfWidth: number }>();
   version = 0;
 
   constructor(readonly tileCount: number) {
